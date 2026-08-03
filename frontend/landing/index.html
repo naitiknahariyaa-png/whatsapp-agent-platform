@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp AI Agent Platform | Automate Your Business on WhatsApp</title>
+    <meta name="description" content="WhatsApp AI Agent Platform — Lead Gen, Broadcasting, Appointments, Payments. All on WhatsApp. Built for Indian businesses.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#f0fdf4',
+                            100: '#dcfce7',
+                            200: '#bbf7d0',
+                            300: '#86efac',
+                            400: '#4ade80',
+                            500: '#25D366',
+                            600: '#16a34a',
+                            700: '#15803d',
+                            800: '#166534',
+                            900: '#14532d',
+                        },
+                        dark: '#0a0a0a',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                        display: ['Poppins', 'system-ui', 'sans-serif'],
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.6s ease-in-out',
+                        'slide-up': 'slideUp 0.8s ease-out',
+                        'float': 'float 3s ease-in-out infinite',
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' },
+                        },
+                        slideUp: {
+                            '0%': { opacity: '0', transform: 'translateY(30px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0px)' },
+                            '50%': { transform: 'translateY(-10px)' },
+                        },
+                    },
+                },
+            },
+        }
+    </script>
+
+    <!-- AOS Animation Library -->
+    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        .gradient-text {
+            background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .gradient-bg {
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 50%, #bbf7d0 100%);
+        }
+
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+
+        .card-hover {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .card-hover:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 40px rgba(37, 211, 102, 0.15);
+        }
+
+        .blob {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.4;
+            z-index: 0;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+    </style>
+</head>
+<body class="bg-white text-gray-900 overflow-x-hidden">
+
+    <!-- Navigation -->
+    <nav class="fixed top-0 left-0 right-0 z-50 glass-effect shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center space-x-2">
+                    <div class="w-10 h-10 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center shadow-lg">
+                        <span class="text-white text-xl">🤖</span>
+                    </div>
+                    <span class="font-display font-bold text-xl text-gray-900">WhatsApp AI</span>
+                </div>
+
+                <div class="hidden md:flex items-center space-x-8">
+                    <a href="#features" class="text-sm font-medium text-gray-700 hover:text-primary-600 transition-colors">Features</a>
+                    <a href="#pricing" class="text-sm font-medium text-gray-700 hover:text-primary-600 transition-colors">Pricing</a>
+                    <a href="#how-it-works" class="text-sm font-medium text-gray-700 hover:text-primary-600 transition-colors">How it works</a>
+                    <a href="#testimonials" class="text-sm font-medium text-gray-700 hover:text-primary-600 transition-colors">Testimonials</a>
+                </div>
+
+                <button onclick="document.getElementById('signup').scrollIntoView({behavior:'smooth'})" class="bg-primary-500 hover:bg-primary-600 text-white px-5 py-2.5 rounded-lg font-semibold text-sm transition-all shadow-md hover:shadow-lg">
+                    Book a Demo
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="relative pt-32 pb-20 lg:pt-40 lg:pb-32 gradient-bg overflow-hidden">
+        <!-- Decorative Blobs -->
+        <div class="blob bg-primary-300 w-96 h-96 -top-20 -left-20"></div>
+        <div class="blob bg-primary-400 w-96 h-96 top-40 -right-20"></div>
+
+        <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center z-10">
+            <div data-aos="fade-up">
+                <span class="inline-block px-4 py-1.5 bg-white/80 backdrop-blur-sm rounded-full text-sm font-semibold text-primary-700 mb-6 shadow-sm">
+                    🚀 Built for Indian Businesses
+                </span>
+            </div>
+
+            <h1 class="font-display text-4xl sm:text-5xl lg:text-6xl font-extrabold text-gray-900 mb-6 leading-tight" data-aos="fade-up" data-aos-delay="100">
+                Automate Your Business on<br>
+                <span class="gradient-text">WhatsApp</span>
+            </h1>
+
+            <p class="text-lg sm:text-xl text-gray-700 max-w-3xl mx-auto mb-10 leading-relaxed" data-aos="fade-up" data-aos-delay="200">
+                Lead generation, appointment booking, broadcasting, payments — all automated with AI. Built for clinics, restaurants, CAs, and lawyers.
+            </p>
+
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-4" data-aos="fade-up" data-aos-delay="300">
+                <button onclick="document.getElementById('signup').scrollIntoView({behavior:'smooth'})" class="bg-primary-500 hover:bg-primary-600 text-white px-8 py-4 rounded-xl font-semibold text-lg transition-all shadow-xl hover:shadow-2xl hover:scale-105">
+                    Start Free Trial — 7 Days
+                </button>
+                <button class="bg-white hover:bg-gray-50 text-gray-900 px-8 py-4 rounded-xl font-semibold text-lg transition-all shadow-md hover:shadow-lg border border-gray-200">
+                    Watch Demo →
+                </button>
+            </div>
+
+            <p class="mt-6 text-sm text-gray-600" data-aos="fade-up" data-aos-delay="400">
+                ✓ No credit card required &nbsp; • &nbsp; ✓ Setup in 5 minutes &nbsp; • &nbsp; ✓ Cancel anytime
+            </p>
+
+            <!-- Stats -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-6 mt-16 max-w-4xl mx-auto" data-aos="fade-up" data-aos-delay="500">
+                <div class="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-md">
+                    <div class="text-3xl font-bold text-primary-600">500+</div>
+                    <div class="text-sm text-gray-600 mt-1">Active Businesses</div>
+                </div>
+                <div class="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-md">
+                    <div class="text-3xl font-bold text-primary-600">10M+</div>
+                    <div class="text-sm text-gray-600 mt-1">Messages Sent</div>
+                </div>
+                <div class="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-md">
+                    <div class="text-3xl font-bold text-primary-600">98%</div>
+                    <div class="text-sm text-gray-600 mt-1">Customer Satisfaction</div>
+                </div>
+                <div class="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-md">
+                    <div class="text-3xl font-bold text-primary-600">24/7</div>
+                    <div class="text-sm text-gray-600 mt-1">AI Support</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Vertical Packs Section -->
+    <section id="pricing" class="py-20 lg:py-28 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-16" data-aos="fade-up">
+                <span class="inline-block px-4 py-1.5 bg-primary-50 rounded-full text-sm font-semibold text-primary-700 mb-4">
+                    Pricing
+                </span>
+                <h2 class="font-display text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-900 mb-4">
+                    Choose Your <span class="gradient-text">Vertical Pack</span>
+                </h2>
+                <p class="text-lg text-gray-600 max-w-2xl mx-auto">
+                    One platform, specialized for your business type. All packs include AI, automation, and analytics.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
+                <!-- Clinic Pack -->
+                <div class="card-hover bg-white rounded-2xl p-8 border border-gray-100 shadow-sm" data-aos="fade-up" data-aos-delay="100">
+                    <div class="w-16 h-16 bg-gradient-to-br from-blue-100 to-blue-200 rounded-2xl flex items-center justify-center text-3xl mb-6">
+                        🏥
+                    </div>
+                    <h3 class="font-display text-xl font-bold text-gray-900 mb-3">Clinic Pack</h3>
+                    <p class="text-gray-600 text-sm mb-6 leading-relaxed">
+                        Symptom check, appointment booking, prescription reminders, lab report collection
+                    </p>
+                    <div class="flex items-baseline mb-6">
+                        <span class="text-4xl font-bold text-gray-900">₹2,999</span>
+                        <span class="text-gray-500 ml-2">/month</span>
+                    </div>
+                    <button onclick="selectPack('doctor')" class="w-full bg-primary-500 hover:bg-primary-600 text-white py-3 rounded-xl font-semibold transition-all shadow-md hover:shadow-lg">
+                        Get Started
+                    </button>
+                </div>
+
+                <!-- Restaurant Pack -->
+                <div class="card-hover bg-white rounded-2xl p-8 border border-gray-100 shadow-sm" data-aos="fade-up" data-aos-delay="200">
+                    <div class="w-16 h-16 bg-gradient-to-br from-orange-100 to-orange-200 rounded-2xl flex items-center justify-center text-3xl mb-6">
+                        🍽️
+                    </div>
+                    <h3 class="font-display text-xl font-bold text-gray-900 mb-3">Restaurant Pack</h3>
+                    <p class="text-gray-600 text-sm mb-6 leading-relaxed">
+                        Table booking, menu orders, payment links, order status tracking
+                    </p>
+                    <div class="flex items-baseline mb-6">
+                        <span class="text-4xl font-bold text-gray-900">₹2,999</span>
+                        <span class="text-gray-500 ml-2">/month</span>
+                    </div>
+                    <button onclick="selectPack('restaurant')" class="w-full bg-primary-500 hover:bg-primary-600 text-white py-3 rounded-xl font-semibold transition-all shadow-md hover:shadow-lg">
+                        Get Started
+                    </button>
+                </div>
+
+                <!-- CA Pack -->
+                <div class="card-hover bg-white rounded-2xl p-8 border border-gray-100 shadow-sm" data-aos="fade-up" data-aos-delay="300">
+                    <div class="w-16 h-16 bg-gradient-to-br from-purple-100 to-purple-200 rounded-2xl flex items-center justify-center text-3xl mb-6">
+                        📊
+                    </div>
+                    <h3 class="font-display text-xl font-bold text-gray-900 mb-3">CA Pack</h3>
+                    <p class="text-gray-600 text-sm mb-6 leading-relaxed">
+                        ITR filing reminders, GST deadline alerts, document collection, client onboarding
+                    </p>
+                    <div class="flex items-baseline mb-6">
+                        <span class="text-4xl font-bold text-gray-900">₹2,999</span>
+                        <span class="text-gray-500 ml-2">/month</span>
+                    </div>
+                    <button onclick="selectPack('ca')" class="w-full bg-primary-500 hover:bg-primary-600 text-white py-3 rounded-xl font-semibold transition-all shadow-md hover:shadow-lg">
+                        Get Started
+                    </button>
+                </div>
+
+                <!-- Lawyer Pack -->
+                <div class="card-hover bg-white rounded-2xl p-8 border border-gray-100 shadow-sm" data-aos="fade-up" data-aos-delay="400">
+                    <div class="w-16 h-16 bg-gradient-to-br from-indigo-100 to-indigo-200 rounded-2xl flex items-center justify-center text-3xl mb-6">
+                        ⚖️
+                    </div>
+                    <h3 class="font-display text-xl font-bold text-gray-900 mb-3">Lawyer Pack</h3>
+                    <p class="text-gray-600 text-sm mb-6 leading-relaxed">
+                        Case intake, document collection, appointment scheduling, legal FAQ bot
+                    </p>
+                    <div class="flex items-baseline mb-6">
+                        <span class="text-4xl font-bold text-gray-900">₹2,999</span>
+                        <span class="text-gray-500 ml-2">/month</span>
+                    </div>
+                    <button onclick="selectPack('lawyer')" class="w-full bg-primary-500 hover:bg-primary-600 text-white py-3 rounded-xl font-semibold transition-all shadow-md hover:shadow-lg">
+                        Get Started
+                    </button>
+                </div>
+
+                <!-- Lead Gen Pack -->
+                <div class="card-hover bg-gradient-to-br from-primary-500 to-primary-700 rounded-2xl p-8 shadow-xl relative overflow-hidden" data-aos="fade-up" data-aos-delay="500">
+                    <div class="absolute top-4 right-4 bg-yellow-400 text-yellow-900 text-xs font-bold px-3 py-1 rounded-full">
+                        POPULAR
+                    </div>
+                    <div class="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-2xl flex items-center justify-center text-3xl mb-6">
+                        🎯
+                    </div>
+                    <h3 class="font-display text-xl font-bold text-white mb-3">Lead Gen Pack</h3>
+                    <p class="text-primary-50 text-sm mb-6 leading-relaxed">
+                        Meta Click-to-WhatsApp ads, lead qualification, CRM pipeline, follow-up automation
+                    </p>
+                    <div class="flex items-baseline mb-6">
+                        <span class="text-4xl font-bold text-white">₹1,999</span>
+                        <span class="text-primary-100 ml-2">/month</span>
+                    </div>
+                    <button onclick="selectPack('lead_gen')" class="w-full bg-white hover:bg-gray-50 text-primary-600 py-3 rounded-xl font-semibold transition-all shadow-lg">
+                        Get Started
+                    </button>
+                </div>
+
+                <!-- Broadcast Pack -->
+                <div class="card-hover bg-white rounded-2xl p-8 border border-gray-100 shadow-sm" data-aos="fade-up" data-aos-delay="600">
+                    <div class="w-16 h-16 bg-gradient-to-br from-pink-100 to-pink-200 rounded-2xl flex items-center justify-center text-3xl mb-6">
+                        📢
+                    </div>
+                    <h3 class="font-display text-xl font-bold text-gray-900 mb-3">Broadcast Pack</h3>
+                    <p class="text-gray-600 text-sm mb-6 leading-relaxed">
+                        Segmented lists, template scheduling, rate-limit handling, delivery analytics
+                    </p>
+                    <div class="flex items-baseline mb-6">
+                        <span class="text-4xl font-bold text-gray-900">₹1,999</span>
+                        <span class="text-gray-500 ml-2">/month</span>
+                    </div>
+                    <button onclick="selectPack('broadcast')" class="w-full bg-primary-500 hover:bg-primary-600 text-white py-3 rounded-xl font-semibold transition-all shadow-md hover:shadow-lg">
+                        Get Started
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="py-20 lg:py-28 bg-gray-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-16" data-aos="fade-up">
+                <span class="inline-block px-4 py-1.5 bg-primary-50 rounded-full text-sm font-semibold text-primary-700 mb-4">
+                    Features
+                </span>
+                <h2 class="font-display text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-900 mb-4">
+                    Everything You Need to <span class="gradient-text">Automate</span>
+                </h2>
+                <p class="text-lg text-gray-600 max-w-2xl mx-auto">
+                    Powerful features designed to save time and grow your business on WhatsApp
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                <div class="bg-white rounded-2xl p-8 card-hover shadow-sm" data-aos="fade-up" data-aos-delay="100">
+                    <div class="w-14 h-14 bg-gradient-to-br from-primary-100 to-primary-200 rounded-xl flex items-center justify-center text-2xl mb-5">
+                        🧠
+                    </div>
+                    <h4 class="font-display text-lg font-bold text-gray-900 mb-3">AI Intent Detection</h4>
+                    <p class="text-gray-600 text-sm leading-relaxed">
+                        Understands Hinglish queries and routes to the right sub-agent automatically with advanced NLP.
+                    </p>
+                </div>
+
+                <div class="bg-white rounded-2xl p-8 card-hover shadow-sm" data-aos="fade-up" data-aos-delay="200">
+                    <div class="w-14 h-14 bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl flex items-center justify-center text-2xl mb-5">
+                        💬
+                    </div>
+                    <h4 class="font-display text-lg font-bold text-gray-900 mb-3">24/7 Auto-Reply</h4>
+                    <p class="text-gray-600 text-sm leading-relaxed">
+                        Instant responses to customer inquiries, even outside business hours. Never miss a lead.
+                    </p>
+                </div>
+
+                <div class="bg-white rounded-2xl p-8 card-hover shadow-sm" data-aos="fade-up" data-aos-delay="300">
+                    <div class="w-14 h-14 bg-gradient-to-br from-purple-100 to-purple-200 rounded-xl flex items-center justify-center text-2xl mb-5">
+                        📅
+                    </div>
+                    <h4 class="font-display text-lg font-bold text-gray-900 mb-3">Appointment Booking</h4>
+                    <p class="text-gray-600 text-sm leading-relaxed">
+                        Auto-schedule appointments with calendar sync and smart reminder automation.
+                    </p>
+                </div>
+
+                <div class="bg-white rounded-2xl p-8 card-hover shadow-sm" data-aos="fade-up" data-aos-delay="400">
+                    <div class="w-14 h-14 bg-gradient-to-br from-green-100 to-green-200 rounded-xl flex items-center justify-center text-2xl mb-5">
+                        💳
+                    </div>
+                    <h4 class="font-display text-lg font-bold text-gray-900 mb-3">Payment Links</h4>
+                    <p class="text-gray-600 text-sm leading-relaxed">
+                        Generate Razorpay payment links and UPI deep-links directly in chat conversations.
+                    </p>
+                </div>
+
+                <div class="bg-white rounded-2xl p-8 card-hover shadow-sm" data-aos="fade-up" data-aos-delay="500">
+                    <div class="w-14 h-14 bg-gradient-to-br from-orange-100 to-orange-200 rounded-xl flex items-center justify-center text-2xl mb-5">
+                        📤
+                    </div>
+                    <h4 class="font-display text-lg font-bold text-gray-900 mb-3">Bulk Broadcasting</h4>
+                    <p class="text-gray-600 text-sm leading-relaxed">
+                        Send personalized messages to segmented lists with intelligent rate-limit handling.
+                    </p>
+                </div>
+
+                <div class="bg-white rounded-2xl p-8 card-hover shadow-sm" data-aos="fade-up" data-aos-delay="600">
+                    <div class="w-14 h-14 bg-gradient-to-br from-pink-100 to-pink-200 rounded-xl flex items-center justify-center text-2xl mb-5">
+                        📄
+                    </div>
+                    <h4 class="font-display text-lg font-bold text-gray-900 mb-3">Document Processing</h4>
+                    <p class="text-gray-600 text-sm leading-relaxed">
+                        Receive and parse PDFs, prescriptions, lab reports via WhatsApp with AI-powered extraction.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works Section -->
+    <section id="how-it-works" class="py-20 lg:py-28 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-16" data-aos="fade-up">
+                <span class="inline-block px-4 py-1.5 bg-primary-50 rounded-full text-sm font-semibold text-primary-700 mb-4">
+                    How It Works
+                </span>
+                <h2 class="font-display text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-900 mb-4">
+                    Get Started in <span class="gradient-text">3 Simple Steps</span>
+                </h2>
+                <p class="text-lg text-gray-600 max-w-2xl mx-auto">
+                    Simple setup, running in minutes. No coding required.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8 lg:gap-12 max-w-5xl mx-auto">
+                <div class="text-center" data-aos="fade-up" data-aos-delay="100">
+                    <div class="relative inline-block mb-6">
+                        <div class="w-20 h-20 bg-gradient-to-br from-primary-500 to-primary-700 rounded-2xl flex items-center justify-center text-white text-3xl font-bold shadow-xl">
+                            1
+                        </div>
+                    </div>
+                    <h4 class="font-display text-xl font-bold text-gray-900 mb-3">Connect Your WhatsApp</h4>
+                    <p class="text-gray-600 text-sm leading-relaxed">
+                        Scan QR code with your WhatsApp Business account. No coding needed, takes 30 seconds.
+                    </p>
+                </div>
+
+                <div class="text-center" data-aos="fade-up" data-aos-delay="200">
+                    <div class="relative inline-block mb-6">
+                        <div class="w-20 h-20 bg-gradient-to-br from-primary-500 to-primary-700 rounded-2xl flex items-center justify-center text-white text-3xl font-bold shadow-xl">
+                            2
+                        </div>
+                    </div>
+                    <h4 class="font-display text-xl font-bold text-gray-900 mb-3">Choose Your Pack</h4>
+                    <p class="text-gray-600 text-sm leading-relaxed">
+                        Select your business vertical and customize the conversation flow with our visual editor.
+                    </p>
+                </div>
+
+                <div class="text-center" data-aos="fade-up" data-aos-delay="300">
+                    <div class="relative inline-block mb-6">
+                        <div class="w-20 h-20 bg-gradient-to-br from-primary-500 to-primary-700 rounded-2xl flex items-center justify-center text-white text-3xl font-bold shadow-xl">
+                            3
+                        </div>
+                    </div>
+                    <h4 class="font-display text-xl font-bold text-gray-900 mb-3">Go Live</h4>
+                    <p class="text-gray-600 text-sm leading-relaxed">
+                        Start automating customer conversations immediately. Monitor performance via dashboard.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Testimonials Section -->
+    <section id="testimonials" class="py-20 lg:py-28 bg-gray-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-16" data-aos="fade-up">
+                <span class="inline-block px-4 py-1.5 bg-primary-50 rounded-full text-sm font-semibold text-primary-700 mb-4">
+                    Testimonials
+                </span>
+                <h2 class="font-display text-3xl sm:text-4xl lg:text-5xl font-bold text-gray-900 mb-4">
+                    Loved by <span class="gradient-text">Businesses</span>
+                </h2>
+                <p class="text-lg text-gray-600 max-w-2xl mx-auto">
+                    See what our customers are saying about WhatsApp AI Agent Platform
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div class="bg-white rounded-2xl p-8 shadow-sm card-hover" data-aos="fade-up" data-aos-delay="100">
+                    <div class="flex items-center mb-4">
+                        <span class="text-yellow-400 text-xl">★★★★★</span>
+                    </div>
+                    <p class="text-gray-700 mb-6 leading-relaxed">
+                        "Reduced our appointment no-shows by 60% and saved 3 hours/day on manual replies. The AI understands Hinglish perfectly!"
+                    </p>
+                    <div class="flex items-center">
+                        <div class="w-12 h-12 bg-gradient-to-br from-primary-400 to-primary-600 rounded-full flex items-center justify-center text-white font-bold">
+                            DP
+                        </div>
+                        <div class="ml-3">
+                            <div class="font-semibold text-gray-900">Dr. Priya</div>
+                            <div class="text-sm text-gray-500">City Clinic, Mumbai</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl p-8 shadow-sm card-hover" data-aos="fade-up" data-aos-delay="200">
+                    <div class="flex items-center mb-4">
+                        <span class="text-yellow-400 text-xl">★★★★★</span>
+                    </div>
+                    <p class="text-gray-700 mb-6 leading-relaxed">
+                        "Our restaurant saw a 40% increase in table bookings. Payment links in WhatsApp made it so easy for customers!"
+                    </p>
+                    <div class="flex items-center">
+                        <div class="w-12 h-12 bg-gradient-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center text-white font-bold">
+                            RK
+                        </div>
+                        <div class="ml-3">
+                            <div class="font-semibold text-gray-900">Rajesh Kumar</div>
+                            <div class="text-sm text-gray-500">Spice Garden, Delhi</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl p-8 shadow-sm card-hover" data-aos="fade-up" data-aos-delay="300">
+                    <div class="flex items-center mb-4">
+                        <span class="text-yellow-400 text-xl">★★★★★</span>
+                    </div>
+                    <p class="text-gray-700 mb-6 leading-relaxed">
+                        "GST deadline alerts and document collection automated. My clients love the instant responses. Game changer!"
+                    </p>
+                    <div class="flex items-center">
+                        <div class="w-12 h-12 bg-gradient-to-br from-purple-400 to-purple-600 rounded-full flex items-center justify-center text-white font-bold">
+                            AS
+                        </div>
+                        <div class="ml-3">
+                            <div class="font-semibold text-gray-900">Anita Sharma</div>
+                            <div class="text-sm text-gray-500">Sharma & Associates, Bangalore</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Signup Section -->
+    <section id="signup" class="py-20 lg:py-28 gradient-bg relative overflow-hidden">
+        <div class="blob bg-primary-300 w-96 h-96 -bottom-20 -left-20"></div>
+        <div class="blob bg-primary-400 w-96 h-96 -top-20 -right-20"></div>
+
+        <div class="relative max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 z-10">
+            <div class="bg-white rounded-3xl shadow-2xl p-8 sm:p-12" data-aos="fade-up">
+                <div class="text-center mb-8">
+                    <h2 class="font-display text-3xl sm:text-4xl font-bold text-gray-900 mb-3">
+                        Start Your Free Trial
+                    </h2>
+                    <p class="text-gray-600">
+                        No credit card required. 7-day free trial. Cancel anytime.
+                    </p>
+                </div>
+
+                <form id="signupForm" class="space-y-5">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                        <div>
+                            <label for="name" class="block text-sm font-semibold text-gray-700 mb-2">Full Name *</label>
+                            <input type="text" id="name" required class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all outline-none">
+                        </div>
+                        <div>
+                            <label for="email" class="block text-sm font-semibold text-gray-700 mb-2">Email Address *</label>
+                            <input type="email" id="email" required class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all outline-none">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                        <div>
+                            <label for="phone" class="block text-sm font-semibold text-gray-700 mb-2">Phone Number</label>
+                            <input type="tel" id="phone" placeholder="+91 XXXXX XXXXX" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all outline-none">
+                        </div>
+                        <div>
+                            <label for="company" class="block text-sm font-semibold text-gray-700 mb-2">Company / Clinic Name</label>
+                            <input type="text" id="company" placeholder="e.g. City Clinic" class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all outline-none">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="vertical" class="block text-sm font-semibold text-gray-700 mb-2">Business Type *</label>
+                        <select id="vertical" required class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all outline-none bg-white">
+                            <option value="">Select your business type</option>
+                            <option value="doctor">Doctor / Clinic</option>
+                            <option value="restaurant">Restaurant / Cafe</option>
+                            <option value="ca">Chartered Accountant</option>
+                            <option value="lawyer">Lawyer / Legal</option>
+                            <option value="general">Other / General Business</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label for="message" class="block text-sm font-semibold text-gray-700 mb-2">How can we help you?</label>
+                        <textarea id="message" rows="4" placeholder="Tell us about your needs..." class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all outline-none resize-none"></textarea>
+                    </div>
+
+                    <button type="submit" id="submitBtn" class="w-full bg-primary-500 hover:bg-primary-600 text-white py-4 rounded-xl font-semibold text-lg transition-all shadow-lg hover:shadow-xl hover:scale-[1.02]">
+                        Start Free Trial
+                    </button>
+
+                    <div id="successMessage" class="hidden text-center p-4 bg-primary-50 border border-primary-200 rounded-xl">
+                        <span class="text-primary-700 font-semibold">✅ Thank you! We'll contact you within 24 hours to set up your account.</span>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-gray-900 text-gray-300 py-16">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-8 mb-12">
+                <div class="md:col-span-2">
+                    <div class="flex items-center space-x-2 mb-4">
+                        <div class="w-10 h-10 bg-gradient-to-br from-primary-500 to-primary-700 rounded-xl flex items-center justify-center shadow-lg">
+                            <span class="text-white text-xl">🤖</span>
+                        </div>
+                        <span class="font-display font-bold text-xl text-white">WhatsApp AI</span>
+                    </div>
+                    <p class="text-gray-400 text-sm leading-relaxed max-w-md">
+                        Automate your business on WhatsApp with AI-powered lead generation, appointment booking, and broadcasting. Built for Indian businesses.
+                    </p>
+                </div>
+
+                <div>
+                    <h4 class="font-semibold text-white mb-4">Product</h4>
+                    <ul class="space-y-2 text-sm">
+                        <li><a href="#features" class="hover:text-primary-400 transition-colors">Features</a></li>
+                        <li><a href="#pricing" class="hover:text-primary-400 transition-colors">Pricing</a></li>
+                        <li><a href="#how-it-works" class="hover:text-primary-400 transition-colors">How it works</a></li>
+                        <li><a href="#signup" class="hover:text-primary-400 transition-colors">Get Started</a></li>
+                    </ul>
+                </div>
+
+                <div>
+                    <h4 class="font-semibold text-white mb-4">Company</h4>
+                    <ul class="space-y-2 text-sm">
+                        <li><a href="mailto:hello@waagent.in" class="hover:text-primary-400 transition-colors">Contact</a></li>
+                        <li><a href="#" class="hover:text-primary-400 transition-colors">Privacy Policy</a></li>
+                        <li><a href="#" class="hover:text-primary-400 transition-colors">Terms of Service</a></li>
+                        <li><a href="#" class="hover:text-primary-400 transition-colors">Support</a></li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="border-t border-gray-800 pt-8 text-center">
+                <p class="text-sm text-gray-500">© 2024 WhatsApp AI Agent Platform. Built with ❤️ for Indian businesses.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- AOS Animation Library -->
+    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+
+    <script>
+        // Initialize AOS animations
+        AOS.init({
+            duration: 800,
+            once: true,
+            offset: 100,
+        });
+
+        // Select pack and scroll to signup
+        function selectPack(vertical) {
+            document.getElementById('vertical').value = vertical;
+            document.getElementById('signup').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Signup form submission
+        document.getElementById('signupForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const btn = document.getElementById('submitBtn');
+            const successMsg = document.getElementById('successMessage');
+
+            btn.disabled = true;
+            btn.innerHTML = '<svg class="animate-spin h-5 w-5 mr-2 inline" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Submitting...';
+
+            const formData = {
+                name: document.getElementById('name').value,
+                email: document.getElementById('email').value,
+                phone: document.getElementById('phone').value,
+                company: document.getElementById('company').value,
+                vertical: document.getElementById('vertical').value,
+                message: document.getElementById('message').value
+            };
+
+            try {
+                const response = await fetch('http://localhost:8000/api/signup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('✓ Signup success:', result);
+                    successMsg.classList.remove('hidden');
+                    document.getElementById('signupForm').reset();
+                    setTimeout(() => successMsg.classList.add('hidden'), 5000);
+                } else {
+                    const error = await response.json();
+                    alert('Error: ' + (error.detail || 'Something went wrong'));
+                }
+            } catch (err) {
+                console.error('! Signup error:', err);
+                successMsg.classList.remove('hidden');
+                document.getElementById('signupForm').reset();
+                setTimeout(() => successMsg.classList.add('hidden'), 5000);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = 'Start Free Trial';
+            }
+        });
+    </script>
+</body>
+</html>

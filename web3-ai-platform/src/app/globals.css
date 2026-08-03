@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+:root {
+  --background: #050508;
+  --foreground: #f8fafc;
+}
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter), sans-serif;
+  --font-display: var(--font-space-grotesk), sans-serif;
+  
+  --color-neon-blue: #00f2fe;
+  --color-neon-purple: #9d4edd;
+  --color-neon-orange: #ff7b00;
+  --color-dark-bg: #050508;
+  --color-dark-surface: #0a0a0f;
+  --color-dark-border: #1a1a2e;
+
+  --animate-marquee: marquee 30s linear infinite;
+  --animate-float: float 6s ease-in-out infinite;
+  --animate-pulse-glow: pulse-glow 3s ease-in-out infinite;
+
+  @keyframes marquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+  @keyframes float {
+    0%, 100% { transform: translateY(0px) rotate(0deg); }
+    50% { transform: translateY(-20px) rotate(1deg); }
+  }
+  @keyframes pulse-glow {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 0.6; }
+  }
+}
+
+/* Base resets & styles */
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  overflow: hidden; /* snap scroll handles it */
+}
+
+/* Custom Scroll Snapping */
+.snap-container {
+  height: 100vh;
+  overflow-y: scroll;
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
+}
+
+.snap-section {
+  scroll-snap-align: start;
+  height: 100vh;
+  width: 100%;
+  position: relative;
+}
+
+/* Hide scrollbar */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Text glow utilities */
+.text-glow-blue {
+  text-shadow: 0 0 20px rgba(0, 242, 254, 0.4);
+}
+
+.text-glow-purple {
+  text-shadow: 0 0 20px rgba(157, 78, 221, 0.4);
+}
+
+/* Glassmorphism panel presets */
+.glass-panel {
+  background: rgba(10, 10, 15, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.glass-panel-glow {
+  background: rgba(10, 10, 15, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(157, 78, 221, 0.15);
+  box-shadow: 0 8px 32px rgba(157, 78, 221, 0.05), inset 0 0 20px rgba(157, 78, 221, 0.02);
+}

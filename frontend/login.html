@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — WhatsApp Agent Platform</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: #0a0a0f; color: #fff; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .bg-grid { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-image: linear-gradient(rgba(37,211,102,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(37,211,102,0.03) 1px, transparent 1px); background-size: 60px 60px; z-index: 0; }
+        .bg-glow { position: fixed; top: -50%; left: -50%; width: 200%; height: 200%; background: radial-gradient(ellipse at 30% 20%, rgba(37,211,102,0.08) 0%, transparent 50%), radial-gradient(ellipse at 70% 80%, rgba(18,140,126,0.06) 0%, transparent 50%); z-index: 0; animation: glowPulse 8s ease-in-out infinite alternate; }
+        @keyframes glowPulse { 0% { opacity: 0.5; transform: scale(1); } 100% { opacity: 1; transform: scale(1.1); } }
+        .login-card { position: relative; z-index: 1; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; padding: 48px 40px; width: 420px; max-width: 90vw; backdrop-filter: blur(20px); }
+        .logo { text-align: center; margin-bottom: 32px; }
+        .logo h1 { font-size: 28px; font-weight: 800; background: linear-gradient(135deg, #25D366, #128C7E); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .logo p { color: #667781; font-size: 14px; margin-top: 4px; }
+        .tabs { display: flex; gap: 4px; background: rgba(255,255,255,0.05); border-radius: 10px; padding: 4px; margin-bottom: 28px; }
+        .tab { flex: 1; padding: 10px; text-align: center; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; color: #667781; transition: all 0.3s; }
+        .tab.active { background: #25D366; color: #000; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; font-size: 13px; color: #a0a0b0; margin-bottom: 6px; font-weight: 500; }
+        .form-group input { width: 100%; padding: 12px 16px; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; font-size: 14px; font-family: 'Inter', sans-serif; transition: all 0.3s; }
+        .form-group input:focus { outline: none; border-color: #25D366; background: rgba(37,211,102,0.05); }
+        .form-group input::placeholder { color: #444; }
+        .btn { width: 100%; padding: 14px; border-radius: 10px; font-weight: 700; font-size: 15px; cursor: pointer; border: none; transition: all 0.3s; font-family: 'Inter', sans-serif; }
+        .btn-primary { background: #25D366; color: #000; }
+        .btn-primary:hover { background: #1ebe5a; transform: translateY(-2px); box-shadow: 0 8px 30px rgba(37,211,102,0.3); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .error-msg { color: #ff6b6b; font-size: 13px; margin-top: 12px; text-align: center; display: none; }
+        .success-msg { color: #25D366; font-size: 13px; margin-top: 12px; text-align: center; display: none; }
+        .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(0,0,0,0.2); border-top-color: #000; border-radius: 50%; animation: spin 0.6s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .back-link { text-align: center; margin-top: 24px; }
+        .back-link a { color: #667781; text-decoration: none; font-size: 13px; transition: color 0.3s; }
+        .back-link a:hover { color: #25D366; }
+    </style>
+</head>
+<body>
+    <div class="bg-grid"></div>
+    <div class="bg-glow"></div>
+
+    <div class="login-card">
+        <div class="logo">
+            <h1>WA Agent</h1>
+            <p>Sign in to your dashboard</p>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" id="tab-login" onclick="switchTab('login')">Login</div>
+            <div class="tab" id="tab-register" onclick="switchTab('register')">Register</div>
+        </div>
+
+        <form id="login-form" onsubmit="return handleLogin(event)">
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="login-email" placeholder="you@example.com" required>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="login-password" placeholder="••••••••" required>
+            </div>
+            <button type="submit" class="btn btn-primary" id="login-btn">Login</button>
+            <div class="error-msg" id="login-error"></div>
+        </form>
+
+        <form id="register-form" onsubmit="return handleRegister(event)" style="display:none">
+            <div class="form-group">
+                <label>Full Name</label>
+                <input type="text" id="reg-name" placeholder="John Doe" required>
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="reg-email" placeholder="you@example.com" required>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="reg-password" placeholder="••••••••" required>
+            </div>
+            <button type="submit" class="btn btn-primary" id="register-btn">Create Account</button>
+            <div class="error-msg" id="register-error"></div>
+            <div class="success-msg" id="register-success"></div>
+        </form>
+
+        <div class="back-link">
+            <a href="/">← Back to home</a>
+        </div>
+    </div>
+
+    <script>
+        const API = window.location.origin;
+        const token = localStorage.getItem('wa_token');
+        if (token) { window.location.href = '/frontend/dashboard.html'; }
+
+        function switchTab(tab) {
+            if (tab === 'login') {
+                document.getElementById('tab-login').classList.add('active');
+                document.getElementById('tab-register').classList.remove('active');
+                document.getElementById('login-form').style.display = 'block';
+                document.getElementById('register-form').style.display = 'none';
+            } else {
+                document.getElementById('tab-login').classList.remove('active');
+                document.getElementById('tab-register').classList.add('active');
+                document.getElementById('login-form').style.display = 'none';
+                document.getElementById('register-form').style.display = 'block';
+            }
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const btn = document.getElementById('login-btn');
+            const errDiv = document.getElementById('login-error');
+            errDiv.style.display = 'none';
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Logging in...';
+            try {
+                const res = await fetch(API + '/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: document.getElementById('login-email').value, password: document.getElementById('login-password').value })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Login failed');
+                localStorage.setItem('wa_token', data.access_token);
+                localStorage.setItem('wa_user', JSON.stringify(data.user));
+                window.location.href = '/frontend/dashboard.html';
+            } catch (err) {
+                errDiv.textContent = err.message;
+                errDiv.style.display = 'block';
+                btn.disabled = false;
+                btn.textContent = 'Login';
+            }
+            return false;
+        }
+
+        async function handleRegister(e) {
+            e.preventDefault();
+            const btn = document.getElementById('register-btn');
+            const errDiv = document.getElementById('register-error');
+            const successDiv = document.getElementById('register-success');
+            errDiv.style.display = 'none';
+            successDiv.style.display = 'none';
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Creating...';
+            try {
+                const res = await fetch(API + '/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: document.getElementById('reg-email').value, password: document.getElementById('reg-password').value, full_name: document.getElementById('reg-name').value })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Registration failed');
+                localStorage.setItem('wa_token', data.access_token);
+                localStorage.setItem('wa_user', JSON.stringify(data.user));
+                successDiv.textContent = 'Account created! Redirecting...';
+                successDiv.style.display = 'block';
+                setTimeout(() => window.location.href = '/frontend/dashboard.html', 1000);
+            } catch (err) {
+                errDiv.textContent = err.message;
+                errDiv.style.display = 'block';
+                btn.disabled = false;
+                btn.textContent = 'Create Account';
+            }
+            return false;
+        }
+    </script>
+</body>
+</html>

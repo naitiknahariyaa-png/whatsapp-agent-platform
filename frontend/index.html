@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp AI Agent Platform — Automate Your Business</title>
+    <meta name="description" content="Enterprise WhatsApp automation platform with AI agents, lead scoring, broadcasting, and vertical packs for restaurants, clinics, CA, lawyers & more.">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: #0a0a0f; color: #fff; overflow-x: hidden; }
+        
+        /* Animated background */
+        .bg-grid {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-image: 
+                linear-gradient(rgba(37, 211, 102, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(37, 211, 102, 0.03) 1px, transparent 1px);
+            background-size: 60px 60px;
+            z-index: 0;
+            pointer-events: none;
+        }
+        .bg-glow {
+            position: fixed; top: -50%; left: -50%; width: 200%; height: 200%;
+            background: radial-gradient(ellipse at 30% 20%, rgba(37, 211, 102, 0.08) 0%, transparent 50%),
+                        radial-gradient(ellipse at 70% 80%, rgba(18, 140, 126, 0.06) 0%, transparent 50%);
+            z-index: 0;
+            pointer-events: none;
+            animation: glowPulse 8s ease-in-out infinite alternate;
+        }
+        @keyframes glowPulse {
+            0% { opacity: 0.5; transform: scale(1); }
+            100% { opacity: 1; transform: scale(1.1); }
+        }
+
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+
+        /* Navbar */
+        nav {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 20px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .logo { font-size: 24px; font-weight: 800; background: linear-gradient(135deg, #25D366, #128C7E); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .logo span { font-weight: 300; }
+        .nav-links { display: flex; gap: 32px; align-items: center; }
+        .nav-links a { color: #a0a0b0; text-decoration: none; font-size: 14px; font-weight: 500; transition: color 0.3s; }
+        .nav-links a:hover { color: #25D366; }
+        .btn {
+            padding: 10px 24px; border-radius: 8px; font-weight: 600; font-size: 14px;
+            cursor: pointer; transition: all 0.3s; text-decoration: none; display: inline-block;
+        }
+        .btn-primary { background: #25D366; color: #000; border: none; }
+        .btn-primary:hover { background: #1ebe5a; transform: translateY(-2px); box-shadow: 0 8px 30px rgba(37, 211, 102, 0.3); }
+        .btn-outline { background: transparent; color: #25D366; border: 1px solid rgba(37, 211, 102, 0.3); }
+        .btn-outline:hover { background: rgba(37, 211, 102, 0.1); border-color: #25D366; }
+        .btn-lg { padding: 14px 36px; font-size: 16px; }
+
+        /* Hero */
+        .hero { padding: 100px 0 80px; text-align: center; }
+        .hero-badge {
+            display: inline-block; padding: 6px 16px; border-radius: 100px;
+            background: rgba(37, 211, 102, 0.1); border: 1px solid rgba(37, 211, 102, 0.2);
+            font-size: 12px; color: #25D366; font-weight: 600; margin-bottom: 24px;
+            letter-spacing: 0.5px; text-transform: uppercase;
+        }
+        .hero h1 { font-size: 56px; font-weight: 900; line-height: 1.1; margin-bottom: 24px; }
+        .hero h1 .highlight { background: linear-gradient(135deg, #25D366, #128C7E, #075E54); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .hero p { font-size: 18px; color: #a0a0b0; max-width: 600px; margin: 0 auto 40px; line-height: 1.6; }
+        .hero-buttons { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+        .hero-stats {
+            display: flex; justify-content: center; gap: 60px; margin-top: 60px;
+            padding: 30px; border-radius: 16px; background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        .hero-stat { text-align: center; }
+        .hero-stat .number { font-size: 32px; font-weight: 800; color: #25D366; }
+        .hero-stat .label { font-size: 13px; color: #667781; margin-top: 4px; }
+
+        /* Features */
+        .section { padding: 80px 0; }
+        .section-title { text-align: center; margin-bottom: 60px; }
+        .section-title h2 { font-size: 36px; font-weight: 800; margin-bottom: 12px; }
+        .section-title p { color: #a0a0b0; font-size: 16px; max-width: 500px; margin: 0 auto; }
+
+        .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+        .feature-card {
+            padding: 32px; border-radius: 16px; background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.06); transition: all 0.3s;
+        }
+        .feature-card:hover { background: rgba(37, 211, 102, 0.05); border-color: rgba(37, 211, 102, 0.2); transform: translateY(-4px); }
+        .feature-icon { font-size: 40px; margin-bottom: 16px; }
+        .feature-card h3 { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+        .feature-card p { font-size: 14px; color: #a0a0b0; line-height: 1.6; }
+
+        /* Vertical Packs */
+        .verticals-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+        .vertical-card {
+            padding: 28px; border-radius: 12px; text-align: center;
+            background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06);
+            transition: all 0.3s; cursor: pointer;
+        }
+        .vertical-card:hover { background: rgba(37, 211, 102, 0.05); border-color: rgba(37, 211, 102, 0.2); transform: translateY(-4px); }
+        .vertical-icon { font-size: 48px; margin-bottom: 12px; }
+        .vertical-card h4 { font-size: 16px; font-weight: 700; }
+        .vertical-card p { font-size: 12px; color: #667781; margin-top: 4px; }
+
+        /* Pricing */
+        .pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+        .pricing-card {
+            padding: 40px 32px; border-radius: 16px; text-align: center;
+            background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.06);
+            transition: all 0.3s; position: relative;
+        }
+        .pricing-card.featured {
+            background: rgba(37, 211, 102, 0.05); border-color: rgba(37, 211, 102, 0.3);
+            transform: scale(1.05);
+        }
+        .pricing-card.featured .badge {
+            position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+            padding: 4px 16px; border-radius: 100px; background: #25D366; color: #000;
+            font-size: 12px; font-weight: 700;
+        }
+        .pricing-card .price { font-size: 42px; font-weight: 900; margin: 16px 0; }
+        .pricing-card .price span { font-size: 16px; font-weight: 400; color: #667781; }
+        .pricing-card ul { list-style: none; margin: 24px 0; text-align: left; }
+        .pricing-card ul li { padding: 8px 0; font-size: 14px; color: #c0c0d0; }
+        .pricing-card ul li::before { content: "✓ "; color: #25D366; font-weight: 700; }
+
+        /* CTA */
+        .cta-section {
+            padding: 80px 0; text-align: center;
+            background: linear-gradient(135deg, rgba(37, 211, 102, 0.05), rgba(18, 140, 126, 0.05));
+            border-radius: 24px; margin: 40px 24px;
+        }
+        .cta-section h2 { font-size: 36px; font-weight: 800; margin-bottom: 16px; }
+        .cta-section p { color: #a0a0b0; max-width: 500px; margin: 0 auto 32px; }
+
+        /* Footer */
+        footer { padding: 40px 0; border-top: 1px solid rgba(255,255,255,0.05); margin-top: 60px; }
+        footer .container { display: flex; justify-content: space-between; align-items: center; }
+        footer p { color: #667781; font-size: 13px; }
+        footer .links { display: flex; gap: 24px; }
+        footer .links a { color: #667781; text-decoration: none; font-size: 13px; transition: color 0.3s; }
+        footer .links a:hover { color: #25D366; }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 32px; }
+            .features-grid { grid-template-columns: 1fr; }
+            .verticals-grid { grid-template-columns: repeat(2, 1fr); }
+            .pricing-grid { grid-template-columns: 1fr; }
+            .pricing-card.featured { transform: none; }
+            .hero-stats { flex-direction: column; gap: 20px; }
+            .nav-links { display: none; }
+            footer .container { flex-direction: column; gap: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-grid"></div>
+    <div class="bg-glow"></div>
+
+    <!-- Navbar -->
+    <div class="container">
+        <nav>
+            <div class="logo">WA<span>Agent</span></div>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="#verticals">Verticals</a>
+                <a href="#pricing">Pricing</a>
+                <a href="/frontend/dashboard.html">Dashboard</a>
+                <a href="/frontend/storefront.html">Demo Store</a>
+                <a href="/docs" class="btn btn-primary">Get Started</a>
+            </div>
+        </nav>
+    </div>
+
+    <!-- Hero -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-badge">🚀 Now in Public Beta</div>
+            <h1>AI Agents for<br><span class="highlight">WhatsApp Business</span></h1>
+            <p>Automate sales, support, appointments & broadcasts with AI-powered WhatsApp agents. 10x your business conversations.</p>
+            <div class="hero-buttons">
+                <a href="/frontend/login.html" class="btn btn-primary btn-lg">🚀 Get Started</a>
+                <a href="/frontend/storefront.html" class="btn btn-outline btn-lg">👁️ View Storefront Demo</a>
+            </div>
+            <div class="hero-stats">
+                <div class="hero-stat">
+                    <div class="number">8</div>
+                    <div class="label">Business Verticals</div>
+                </div>
+                <div class="hero-stat">
+                    <div class="number">10</div>
+                    <div class="label">Color Themes</div>
+                </div>
+                <div class="hero-stat">
+                    <div class="number">20+</div>
+                    <div class="label">API Endpoints</div>
+                </div>
+                <div class="hero-stat">
+                    <div class="number">100%</div>
+                    <div class="label">Open Source</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features -->
+    <section class="section" id="features">
+        <div class="container">
+            <div class="section-title">
+                <h2>Everything You Need</h2>
+                <p>Complete WhatsApp automation platform with AI-powered features</p>
+            </div>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🧠</div>
+                    <h3>AI Agent Engine</h3>
+                    <p>LangChain-powered intent detection & sub-agent routing. Sales, support, appointments — all automated.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🎯</div>
+                    <h3>Lead Scoring</h3>
+                    <p>Auto-qualify leads from Instagram/FB ads. Hot/Warm/Cold scoring with CRM pipeline integration.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📢</div>
+                    <h3>Broadcast Engine</h3>
+                    <p>Segmented lists, template approval, scheduling & rate-limiting. Like Aisensy/WATI — but self-hosted.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📅</div>
+                    <h3>Smart Booking</h3>
+                    <p>Doctor appointments, restaurant tables, lawyer consultations. Calendar sync with reminders.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📄</div>
+                    <h3>Document Collection</h3>
+                    <p>CA/Lawyer document intake via WhatsApp. PDF parsing with PyMuPDF. Secure storage.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">💳</div>
+                    <h3>Payments</h3>
+                    <p>Razorpay integration for order payments, appointment deposits & subscription billing.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🎨</div>
+                    <h3>10 Color Themes</h3>
+                    <p>WhatsApp Green, Royal Blue, Rose Gold, Midnight, Sunset & more. One-click theme switching.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📊</div>
+                    <h3>Owner Dashboard</h3>
+                    <p>Real-time analytics, order management, catalog editor & business profile manager.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🔌</div>
+                    <h3>Plugin Marketplace</h3>
+                    <p>Extend with plugins. Multi-channel hub (WhatsApp + Telegram + Web), referral system & more.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Verticals -->
+    <section class="section" id="verticals">
+        <div class="container">
+            <div class="section-title">
+                <h2>Vertical Packs</h2>
+                <p>Pre-built templates for every business type</p>
+            </div>
+            <div class="verticals-grid">
+                <div class="vertical-card">
+                    <div class="vertical-icon">🍽️</div>
+                    <h4>Restaurant</h4>
+                    <p>Menu ordering, table booking, delivery tracking</p>
+                    <button onclick="setupBusiness('restaurant')" style="margin-top:12px;background:var(--primary);color:white;padding:6px 12px;border:none;border-radius:6px;font-size:13px;cursor:pointer">Get Started</button>
+                </div>
+                <div class="vertical-card">
+                    <div class="vertical-icon">🏨</div>
+                    <h4>Hotel</h4>
+                    <p>Room booking, concierge, guest services</p>
+                </div>
+                <div class="vertical-card">
+                    <div class="vertical-icon">🩺</div>
+                    <h4>Doctor / Clinic</h4>
+                    <p>Symptom triage, appointment booking, reminders</p>
+                </div>
+                <div class="vertical-card">
+                    <div class="vertical-icon">📊</div>
+                    <h4>CA / Accountant</h4>
+                    <p>Document collection, ITR reminders, GST filing</p>
+                </div>
+                <div class="vertical-card">
+                    <div class="vertical-icon">⚖️</div>
+                    <h4>Lawyer / Legal</h4>
+                    <p>Case intake, document collection, consultation booking</p>
+                </div>
+                <div class="vertical-card">
+                    <div class="vertical-icon">💇</div>
+                    <h4>Salon / Beauty</h4>
+                    <p>Service menu, appointment booking, staff selection</p>
+                </div>
+                <div class="vertical-card">
+                    <div class="vertical-icon">🛍️</div>
+                    <h4>Retail Shop</h4>
+                    <p>Product catalog, order management, delivery</p>
+                </div>
+                <div class="vertical-card">
+                    <div class="vertical-icon">📚</div>
+                    <h4>Education</h4>
+                    <p>Course inquiry, enrollment, fee collection</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing -->
+    <section class="section" id="pricing">
+        <div class="container">
+            <div class="section-title">
+                <h2>Simple Pricing</h2>
+                <p>Self-hosted or cloud — you choose</p>
+            </div>
+            <div class="pricing-grid">
+                <div class="pricing-card">
+                    <h3>Self-Hosted</h3>
+                    <div class="price">Free<span>/forever</span></div>
+                    <ul>
+                        <li>All features included</li>
+                        <li>Unlimited conversations</li>
+                        <li>Bring your own server</li>
+                        <li>Docker deployment</li>
+                        <li>Community support</li>
+                    </ul>
+                    <a href="https://github.com/your-username/whatsapp-agent-platform" class="btn btn-outline" style="width:100%;">Deploy Now</a>
+                </div>
+                <div class="pricing-card featured">
+                    <div class="badge">Popular</div>
+                    <h3>Cloud Starter</h3>
+                    <div class="price">₹2,999<span>/mo</span></div>
+                    <ul>
+                        <li>Managed hosting</li>
+                        <li>Up to 5,000 conversations</li>
+                        <li>1 vertical pack included</li>
+                        <li>WhatsApp API setup</li>
+                        <li>Email support</li>
+                    </ul>
+                    <a href="#" class="btn btn-primary" style="width:100%;">Coming Soon</a>
+                </div>
+                <div class="pricing-card">
+                    <h3>Cloud Business</h3>
+                    <div class="price">₹7,999<span>/mo</span></div>
+                    <ul>
+                        <li>All Cloud Starter features</li>
+                        <li>Up to 50,000 conversations</li>
+                        <li>All vertical packs</li>
+                        <li>Broadcast engine</li>
+                        <li>Priority support + SLA</li>
+                    </ul>
+                    <a href="#" class="btn btn-outline" style="width:100%;">Coming Soon</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <div class="container">
+        <div class="cta-section">
+            <h2>Ready to Automate?</h2>
+            <p>Deploy in 5 minutes. Connect WhatsApp. Start selling.</p>
+            <div class="hero-buttons">
+                <a href="/frontend/dashboard.html" class="btn btn-primary btn-lg">🚀 Launch Dashboard</a>
+                <a href="/frontend/storefront.html" class="btn btn-outline btn-lg">👁️ Customer Storefront</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <p>© 2026 WhatsApp Agent Platform. Built with ❤️ in India.</p>
+            <div class="links">
+                <a href="/health">API Health</a>
+                <a href="/api/business/types">Business Types</a>
+                <a href="/api/themes">Themes</a>
+                <a href="/stats">Stats</a>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>
