@@ -42,6 +42,19 @@ JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "24"))
 
 security = HTTPBearer(auto_error=False)
 
+# In-memory token blacklist for logout (JTI-based)
+_blacklisted_jtis: set = set()
+
+
+def blacklist_token(jti: str):
+    """Add a token's JTI to the blacklist (logout)."""
+    _blacklisted_jtis.add(jti)
+
+
+def is_token_blacklisted(jti: str) -> bool:
+    """Check if a token JTI is blacklisted."""
+    return jti in _blacklisted_jtis
+
 
 class Role(str, Enum):
     """User roles for RBAC"""
@@ -162,7 +175,10 @@ def create_access_token(user_id: int, email: str, role: str,
 def decode_token(token: str) -> Dict[str, Any]:
     """Decode and validate a JWT. Raises HTTPException on failure."""
     try:
-        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        if is_token_blacklisted(payload.get("jti", "")):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token revoked (logged out)")
+        return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
     except jwt.InvalidTokenError as e:

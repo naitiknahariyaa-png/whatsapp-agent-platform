@@ -31,6 +31,8 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 from fastapi import Depends
+from fastapi.security import HTTPAuthorizationCredentials
+from auth import security
 
 from db import init_db, get_session, save_message, get_conversation_history, upsert_contact
 from orchestrator import AgentOrchestrator
@@ -259,6 +261,167 @@ async def auth_me(user: User = Depends(get_current_user)):
     return {"id": user.id, "email": user.email, "full_name": user.full_name,
             "role": user.role, "client_id": user.client_id,
             "api_key": user.api_key, "last_login": str(user.last_login or "")}
+
+
+@app.post("/auth/logout")
+async def auth_logout(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """Log out — blacklist the current JWT token."""
+    if not credentials or not credentials.credentials:
+        raise HTTPException(status_code=401, detail="Missing token")
+    from auth import decode_token, blacklist_token
+    payload = decode_token(credentials.credentials)
+    blacklist_token(payload.get("jti", ""))
+    return {"status": "ok", "message": "Logged out"}
+
+
+# ---------------------------------------------------------------------------
+# Multi-tenant "My Business" Endpoints (visitor-specific)
+# ---------------------------------------------------------------------------
+
+def _get_my_client_id(user: User) -> int:
+    """Return the user's client_id (or user.id as fallback for self-service)."""
+    return user.client_id or user.id
+
+
+@app.get("/api/me/business")
+async def my_business(user: User = Depends(get_current_user)):
+    """Get the visitor's own business profile."""
+    from business_profiles import business_manager
+    cid = _get_my_client_id(user)
+    for p in business_manager.profiles.values():
+        if p.client_id == cid:
+            return p.to_dict()
+    return {"status": "no_business", "client_id": cid}
+
+
+@app.post("/api/me/business")
+async def create_my_business(request: Request, user: User = Depends(get_current_user)):
+    """Create/update the visitor's own business profile (multi-tenant)."""
+    from business_profiles import business_manager, BusinessProfile, BusinessType
+    import uuid
+    body = await request.json()
+    business_type = body.get("business_type", "general")
+    name = body.get("name", "")
+    if not name:
+        raise HTTPException(status_code=400, detail="Business name required")
+
+    # Find existing profile for this user
+    existing = None
+    for p in business_manager.profiles.values():
+        if p.client_id == user.id:
+            existing = p
+            break
+
+    if existing:
+        # Update existing
+        for key, value in body.items():
+            if hasattr(existing, key) and key not in ("id", "client_id", "owner_id", "created_at"):
+                setattr(existing, key, value)
+        existing.updated_at = datetime.utcnow().isoformat()
+        business_manager._save()
+        return {"status": "updated", "business": existing.to_dict()}
+
+    # Create new
+    try:
+        bt = BusinessType(business_type)
+    except ValueError:
+        bt = BusinessType.CUSTOM
+    profile = BusinessProfile(
+        id=uuid.uuid4().hex[:8],
+        client_id=user.id,
+        owner_id=str(user.id),
+        business_type=bt,
+        name=name,
+        description=body.get("description", ""),
+        logo_url=body.get("logo_url", ""),
+        primary_color=body.get("primary_color", "#25D366"),
+        secondary_color=body.get("secondary_color", "#128C7E"),
+        welcome_message=body.get("welcome_message", ""),
+        contact_phone=body.get("contact_phone", ""),
+        contact_email=body.get("contact_email", ""),
+        address=body.get("address", ""),
+        website=body.get("website", ""),
+        payment_methods=body.get("payment_methods", ["cash", "upi"]),
+        delivery_enabled=body.get("delivery_enabled", False),
+        delivery_radius_km=body.get("delivery_radius_km", 5),
+        tax_rate_percent=body.get("tax_rate_percent", 5.0),
+    )
+    business_manager.create_profile(profile)
+
+    # Link the user's client_id to this business (multi-tenant)
+    try:
+        from db import async_session
+        from sqlalchemy import select
+        async with async_session() as session:
+            db_user = (await session.execute(select(User).where(User.id == user.id))).scalar_one_or_none()
+            if db_user:
+                db_user.client_id = user.id
+                await session.commit()
+    except Exception as e:
+        logger.warning(f"Could not link client_id: {e}")
+
+    return {"status": "created", "business": profile.to_dict()}
+
+
+@app.get("/api/me/catalog")
+async def my_catalog(user: User = Depends(get_current_user)):
+    """Get the visitor's own catalog."""
+    from business_profiles import business_manager
+    cid = _get_my_client_id(user)
+    for p in business_manager.profiles.values():
+        if p.client_id == cid:
+            return {"items": business_manager.get_catalog(p.id)}
+    return {"items": []}
+
+
+@app.post("/api/me/catalog/add")
+async def add_my_catalog_item(request: Request, user: User = Depends(get_current_user)):
+    """Add an item to the visitor's own catalog."""
+    from business_profiles import business_manager, CatalogItem
+    import uuid
+    cid = _get_my_client_id(user)
+    body = await request.json()
+    profile = None
+    for p in business_manager.profiles.values():
+        if p.client_id == cid:
+            profile = p
+            break
+    if not profile:
+        raise HTTPException(status_code=400, detail="Create business profile first")
+    item = CatalogItem(
+        id=uuid.uuid4().hex[:8],
+        business_id=profile.id,
+        category=body.get("category", "General"),
+        name=body.get("name", ""),
+        description=body.get("description", ""),
+        price=float(body.get("price", 0)),
+        image_url=body.get("image_url", ""),
+        is_available=body.get("is_available", True),
+    )
+    business_manager.add_catalog_item(profile.id, item)
+    return {"status": "added", "item": item.to_dict()}
+
+
+@app.get("/api/me/orders")
+async def my_orders(user: User = Depends(get_current_user)):
+    """Get the visitor's own orders."""
+    from business_profiles import business_manager
+    cid = _get_my_client_id(user)
+    for p in business_manager.profiles.values():
+        if p.client_id == cid:
+            return {"orders": business_manager.get_orders(p.id)}
+    return {"orders": []}
+
+
+@app.get("/api/me/stats")
+async def my_stats(user: User = Depends(get_current_user)):
+    """Get the visitor's own business stats."""
+    from business_profiles import business_manager
+    cid = _get_my_client_id(user)
+    for p in business_manager.profiles.values():
+        if p.client_id == cid:
+            return business_manager.get_business_stats(p.id)
+    return {"total_orders": 0, "pending": 0, "completed": 0, "revenue": 0, "avg_order_value": 0}
 
 
 # ---------------------------------------------------------------------------

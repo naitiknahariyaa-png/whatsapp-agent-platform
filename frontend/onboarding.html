@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Get Started — WhatsApp Agent Platform</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: #0a0a0f; color: #fff; min-height: 100vh; }
+        .bg-grid { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-image: linear-gradient(rgba(37,211,102,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(37,211,102,0.03) 1px, transparent 1px); background-size: 60px 60px; z-index: 0; }
+        .container { max-width: 800px; margin: 0 auto; padding: 40px 24px; position: relative; z-index: 1; }
+        .header { text-align: center; margin-bottom: 40px; }
+        .header h1 { font-size: 32px; font-weight: 800; background: linear-gradient(135deg, #25D366, #128C7E); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .header p { color: #667781; margin-top: 8px; }
+        .progress { display: flex; justify-content: center; gap: 8px; margin-bottom: 40px; }
+        .step-dot { width: 12px; height: 12px; border-radius: 50%; background: #2a2a35; transition: all 0.3s; }
+        .step-dot.active { background: #25D366; transform: scale(1.3); }
+        .step-dot.done { background: #128C7E; }
+        .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 20px; padding: 40px; backdrop-filter: blur(20px); }
+        .step { display: none; }
+        .step.active { display: block; animation: fadeIn 0.4s; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .step-title { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+        .step-sub { color: #667781; font-size: 14px; margin-bottom: 24px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 13px; color: #a0a0b0; margin-bottom: 6px; font-weight: 500; }
+        .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 12px 16px; border-radius: 10px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; font-size: 14px; font-family: 'Inter', sans-serif; transition: all 0.3s; }
+        .form-group input:focus, .form-group textarea:focus, .form-group select:focus { outline: none; border-color: #25D366; background: rgba(37,211,102,0.05); }
+        .form-group input::placeholder, .form-group textarea::placeholder { color: #444; }
+        .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .vertical-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+        .vertical-card { border: 2px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.3s; }
+        .vertical-card:hover { border-color: #25D366; transform: translateY(-2px); }
+        .vertical-card.selected { border-color: #25D366; background: rgba(37,211,102,0.1); }
+        .vertical-icon { font-size: 36px; margin-bottom: 8px; }
+        .vertical-name { font-size: 13px; font-weight: 600; }
+        .btn { padding: 14px 32px; border-radius: 10px; font-weight: 700; font-size: 15px; cursor: pointer; border: none; transition: all 0.3s; font-family: 'Inter', sans-serif; }
+        .btn-primary { background: #25D366; color: #000; }
+        .btn-primary:hover { background: #1ebe5a; transform: translateY(-2px); box-shadow: 0 8px 30px rgba(37,211,102,0.3); }
+        .btn-outline { background: transparent; color: #25D366; border: 1px solid rgba(37,211,102,0.3); }
+        .btn-outline:hover { background: rgba(37,211,102,0.1); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-row { display: flex; justify-content: space-between; gap: 16px; margin-top: 24px; }
+        .error-msg { color: #ff6b6b; font-size: 13px; margin-top: 12px; display: none; }
+        .success-msg { color: #25D366; font-size: 13px; margin-top: 12px; display: none; }
+        .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(0,0,0,0.2); border-top-color: #000; border-radius: 50%; animation: spin 0.6s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .catalog-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; margin-bottom: 8px; }
+        .catalog-item .name { font-weight: 600; }
+        .catalog-item .price { color: #25D366; font-weight: 700; }
+        .go-live { text-align: center; padding: 20px; }
+        .go-live .icon { font-size: 64px; margin-bottom: 16px; }
+        .go-live h2 { font-size: 28px; margin-bottom: 8px; }
+        .go-live p { color: #667781; margin-bottom: 24px; }
+        .storefront-link { display: block; padding: 12px; background: rgba(37,211,102,0.1); border: 1px solid rgba(37,211,102,0.3); border-radius: 10px; color: #25D366; text-decoration: none; margin-bottom: 16px; word-break: break-all; }
+        @media (max-width: 600px) { .vertical-grid { grid-template-columns: repeat(2, 1fr); } .form-row { grid-template-columns: 1fr; } .card { padding: 24px; } }
+    </style>
+</head>
+<body>
+    <div class="bg-grid"></div>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Get Started</h1>
+            <p>Set up your WhatsApp AI agent in minutes</p>
+        </div>
+
+        <div class="progress" id="progress">
+            <div class="step-dot active" data-step="0"></div>
+            <div class="step-dot" data-step="1"></div>
+            <div class="step-dot" data-step="2"></div>
+            <div class="step-dot" data-step="3"></div>
+            <div class="step-dot" data-step="4"></div>
+        </div>
+
+        <div class="card">
+            <!-- Step 0: Sign Up / Login -->
+            <div class="step active" id="step-0">
+                <div class="step-title">Create Your Account</div>
+                <div class="step-sub">Sign up free — no credit card needed</div>
+                <div class="form-group">
+                    <label>Full Name</label>
+                    <input type="text" id="fullName" placeholder="John Doe">
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="email" placeholder="you@example.com">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="password" placeholder="••••••••">
+                </div>
+                <div class="error-msg" id="signupError"></div>
+                <div class="btn-row">
+                    <a href="/frontend/login.html" class="btn btn-outline">Already have account? Login</a>
+                    <button class="btn btn-primary" onclick="signup()">Create Account →</button>
+                </div>
+            </div>
+
+            <!-- Step 1: Choose Vertical -->
+            <div class="step" id="step-1">
+                <div class="step-title">Choose Your Business Type</div>
+                <div class="step-sub">Select the vertical that fits your business</div>
+                <div class="vertical-grid" id="verticalGrid"></div>
+                <div class="error-msg" id="verticalError"></div>
+                <div class="btn-row">
+                    <button class="btn btn-outline" onclick="goStep(0)">← Back</button>
+                    <button class="btn btn-primary" onclick="nextFromVertical()">Next →</button>
+                </div>
+            </div>
+
+            <!-- Step 2: Business Profile -->
+            <div class="step" id="step-2">
+                <div class="step-title">Business Details</div>
+                <div class="step-sub">Tell us about your business</div>
+                <div class="form-group">
+                    <label>Business Name *</label>
+                    <input type="text" id="bizName" placeholder="e.g., Sharma & Associates">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Contact Phone</label>
+                        <input type="tel" id="bizPhone" placeholder="98765 43210">
+                    </div>
+                    <div class="form-group">
+                        <label>Contact Email</label>
+                        <input type="email" id="bizEmail" placeholder="contact@business.com">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="bizDesc" rows="2" placeholder="Brief description of your business"></textarea>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Address</label>
+                        <input type="text" id="bizAddress" placeholder="Shop address">
+                    </div>
+                    <div class="form-group">
+                        <label>Website</label>
+                        <input type="text" id="bizWebsite" placeholder="https://...">
+                    </div>
+                </div>
+                <div class="error-msg" id="bizError"></div>
+                <div class="btn-row">
+                    <button class="btn btn-outline" onclick="goStep(1)">← Back</button>
+                    <button class="btn btn-primary" onclick="saveBusiness()">Save & Continue →</button>
+                </div>
+            </div>
+
+            <!-- Step 3: Add Catalog -->
+            <div class="step" id="step-3">
+                <div class="step-title">Add Your Products/Services</div>
+                <div class="step-sub">Add items to your catalog (you can add more later)</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Item Name</label>
+                        <input type="text" id="itemName" placeholder="e.g., ITR Filing">
+                    </div>
+                    <div class="form-group">
+                        <label>Category</label>
+                        <input type="text" id="itemCategory" placeholder="e.g., Tax Services">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Price (₹)</label>
+                        <input type="number" id="itemPrice" placeholder="999" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label>Description</label>
+                        <input type="text" id="itemDesc" placeholder="Optional">
+                    </div>
+                </div>
+                <button class="btn btn-outline" onclick="addCatalogItem()" style="width:100%;margin-bottom:16px">➕ Add Item</button>
+                <div id="catalogList"></div>
+                <div class="error-msg" id="catalogError"></div>
+                <div class="btn-row">
+                    <button class="btn btn-outline" onclick="goStep(2)">← Back</button>
+                    <button class="btn btn-primary" onclick="goStep(4)">Skip / Continue →</button>
+                </div>
+            </div>
+
+            <!-- Step 4: Go Live -->
+            <div class="step" id="step-4">
+                <div class="go-live">
+                    <div class="icon">🎉</div>
+                    <h2>You're Live!</h2>
+                    <p>Your WhatsApp AI agent is ready. Share your storefront with customers.</p>
+                    <a class="storefront-link" id="storefrontLink" href="#" target="_blank">Loading...</a>
+                    <div class="btn-row" style="justify-content:center">
+                        <a href="/frontend/dashboard.html" class="btn btn-primary">📊 Go to Dashboard</a>
+                        <a href="/frontend/storefront.html" class="btn btn-outline">👁️ View Storefront</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API = window.location.origin;
+        let token = localStorage.getItem('wa_token') || localStorage.getItem('authToken') || '';
+        let selectedVertical = '';
+        let currentStep = 0;
+        let businessId = '';
+
+        // If already logged in, skip to step 1
+        if (token) { goStep(1); }
+
+        function goStep(step) {
+            currentStep = step;
+            document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+            document.getElementById('step-' + step).classList.add('active');
+            document.querySelectorAll('.step-dot').forEach((d, i) => {
+                d.classList.toggle('active', i === step);
+                d.classList.toggle('done', i < step);
+            });
+            if (step === 1) loadVerticals();
+            if (step === 4) loadStorefrontLink();
+        }
+
+        async function signup() {
+            const name = document.getElementById('fullName').value.trim();
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+            const err = document.getElementById('signupError');
+            err.style.display = 'none';
+            if (!name || !email || !password) { err.textContent = 'All fields required'; err.style.display = 'block'; return; }
+            try {
+                const res = await fetch(API + '/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password, full_name: name })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Signup failed');
+                token = data.access_token;
+                localStorage.setItem('wa_token', token);
+                localStorage.setItem('authToken', token);
+                goStep(1);
+            } catch (e) { err.textContent = e.message; err.style.display = 'block'; }
+        }
+
+        async function loadVerticals() {
+            try {
+                const res = await fetch(API + '/api/business/types');
+                const data = await res.json();
+                document.getElementById('verticalGrid').innerHTML = data.types.map(t =>
+                    `<div class="vertical-card" onclick="selectVertical('${t.type}')" id="v-${t.type}">
+                        <div class="vertical-icon">${t.icon}</div>
+                        <div class="vertical-name">${t.name}</div>
+                    </div>`).join('');
+            } catch (e) { console.error(e); }
+        }
+
+        function selectVertical(type) {
+            selectedVertical = type;
+            document.querySelectorAll('.vertical-card').forEach(c => c.classList.remove('selected'));
+            document.getElementById('v-' + type).classList.add('selected');
+        }
+
+        function nextFromVertical() {
+            const err = document.getElementById('verticalError');
+            err.style.display = 'none';
+            if (!selectedVertical) { err.textContent = 'Please select a business type'; err.style.display = 'block'; return; }
+            goStep(2);
+        }
+
+        async function saveBusiness() {
+            const name = document.getElementById('bizName').value.trim();
+            const err = document.getElementById('bizError');
+            err.style.display = 'none';
+            if (!name) { err.textContent = 'Business name required'; err.style.display = 'block'; return; }
+            try {
+                const res = await fetch(API + '/api/me/business', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                    body: JSON.stringify({
+                        name,
+                        business_type: selectedVertical,
+                        contact_phone: document.getElementById('bizPhone').value,
+                        contact_email: document.getElementById('bizEmail').value,
+                        description: document.getElementById('bizDesc').value,
+                        address: document.getElementById('bizAddress').value,
+                        website: document.getElementById('bizWebsite').value
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Failed to save');
+                businessId = data.business.id;
+                goStep(3);
+            } catch (e) { err.textContent = e.message; err.style.display = 'block'; }
+        }
+
+        async function addCatalogItem() {
+            const name = document.getElementById('itemName').value.trim();
+            const category = document.getElementById('itemCategory').value.trim();
+            const price = document.getElementById('itemPrice').value;
+            const err = document.getElementById('catalogError');
+            err.style.display = 'none';
+            if (!name || !category || !price) { err.textContent = 'Name, category and price required'; err.style.display = 'block'; return; }
+            try {
+                const res = await fetch(API + '/api/me/catalog/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                    body: JSON.stringify({ name, category, price: parseFloat(price), description: document.getElementById('itemDesc').value })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || 'Failed to add');
+                const list = document.getElementById('catalogList');
+                list.insertAdjacentHTML('beforeend', `<div class="catalog-item"><span class="name">${data.item.name}</span><span class="price">₹${data.item.price}</span></div>`);
+                document.getElementById('itemName').value = '';
+                document.getElementById('itemCategory').value = '';
+                document.getElementById('itemPrice').value = '';
+                document.getElementById('itemDesc').value = '';
+            } catch (e) { err.textContent = e.message; err.style.display = 'block'; }
+        }
+
+        function loadStorefrontLink() {
+            const link = document.getElementById('storefrontLink');
+            link.href = API + '/frontend/storefront.html?biz=' + businessId;
+            link.textContent = API + '/frontend/storefront.html?biz=' + businessId;
+        }
+    </script>
+</body>
+</html>
