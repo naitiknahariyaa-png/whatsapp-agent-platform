@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Allow: /frontend/
+Disallow: /agent-engine/
+Disallow: /whatsapp-bridge/
+
+Sitemap: https://whatsapp-agent-platform.onrender.com/frontend/sitemap.xml

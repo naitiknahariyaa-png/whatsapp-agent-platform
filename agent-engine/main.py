@@ -27,7 +27,7 @@ if _SERVICES_DIR not in sys.path:
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from fastapi import Depends
@@ -154,6 +154,22 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+
+@app.get("/sitemap.xml")
+async def sitemap():
+    """Serve sitemap.xml for SEO."""
+    sitemap_path = os.path.join(_FRONTEND_DIR, "sitemap.xml")
+    if os.path.exists(sitemap_path):
+        return FileResponse(sitemap_path, media_type="application/xml")
+    return Response(content="", media_type="application/xml")
+
+@app.get("/robots.txt")
+async def robots():
+    """Serve robots.txt for SEO."""
+    robots_path = os.path.join(_FRONTEND_DIR, "robots.txt")
+    if os.path.exists(robots_path):
+        return FileResponse(robots_path, media_type="text/plain")
+    return Response(content="User-agent: *\nAllow: /", media_type="text/plain")
 
 @app.get("/stats")
 async def stats():

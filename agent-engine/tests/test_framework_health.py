@@ -51,6 +51,18 @@ def test_stats_endpoint(client):
     assert resp.json()["status"] == "ok"
 
 
+def test_sitemap_endpoint(client):
+    resp = client.get("/sitemap.xml")
+    assert resp.status_code == 200
+    assert "urlset" in resp.text
+
+
+def test_robots_endpoint(client):
+    resp = client.get("/robots.txt")
+    assert resp.status_code == 200
+    assert "User-agent" in resp.text
+
+
 def test_auth_me(client, auth_token):
     resp = client.get("/auth/me", headers={"Authorization": f"Bearer {auth_token}"})
     assert resp.status_code == 200
@@ -98,6 +110,52 @@ def test_frontend_dashboard_updated():
     assert count == 1, f"Expected 1 showSection, found {count}"
 
 
+def test_frontend_dashboard_has_analytics():
+    dashboard_path = os.path.join(_AGENT_DIR, "..", "frontend", "dashboard.html")
+    assert os.path.exists(dashboard_path)
+    with open(dashboard_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "section-analytics" in content
+    assert "revenueChart" in content
+    assert "funnelChart" in content
+    assert "section-keys" in content
+    assert "section-whatsapp" in content
+    assert "chart.js" in content
+
+
+def test_frontend_index_seo():
+    index_path = os.path.join(_AGENT_DIR, "..", "frontend", "index.html")
+    assert os.path.exists(index_path)
+    with open(index_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "og:title" in content
+    assert "og:description" in content
+    assert "twitter:card" in content
+    assert "application/ld+json" in content
+    assert "keywords" in content.lower()
+    assert "canonical" in content
+
+
+def test_frontend_sitemap_exists():
+    sitemap_path = os.path.join(_AGENT_DIR, "..", "frontend", "sitemap.xml")
+    assert os.path.exists(sitemap_path)
+
+
+def test_frontend_robots_exists():
+    robots_path = os.path.join(_AGENT_DIR, "..", "frontend", "robots.txt")
+    assert os.path.exists(robots_path)
+
+
+def test_frontend_onboarding_premium():
+    onboarding_path = os.path.join(_AGENT_DIR, "..", "frontend", "onboarding.html")
+    assert os.path.exists(onboarding_path)
+    with open(onboarding_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "Premium Services" in content
+    assert "qr" in content.lower()
+    assert "whatsapp" in content.lower()
+
+
 def test_figma_service_exists():
     figma_path = os.path.join(_SERVICES_DIR, "figma_integration.py")
     assert os.path.exists(figma_path)
@@ -117,17 +175,29 @@ def test_figma_status_endpoint(client):
 def test_secrets_manager():
     """Test that the secrets manager works and doesn't expose values."""
     from secrets_manager import secrets
-    # Check required production secret exists (GROQ_API_KEY is configured)
     assert secrets.is_configured("GROQ_API_KEY")
-    # Redaction should hide the value
     redacted = secrets.redact("supersecretvalue123")
     assert "supersecretvalue123" not in redacted
-    assert "..." in redacted  # redaction shows first4...last4
+    assert "..." in redacted
     assert len(redacted) < len("supersecretvalue123")
-    # Summary should not contain actual values
     summary = secrets.summary()
     assert isinstance(summary, dict)
     assert all(isinstance(v, bool) for v in summary.values())
+
+
+def test_whatsapp_qr_requires_auth(client):
+    resp = client.get("/api/whatsapp/qr")
+    assert resp.status_code == 401
+
+
+def test_whatsapp_status_requires_auth(client):
+    resp = client.get("/api/whatsapp/status")
+    assert resp.status_code == 401
+
+
+def test_api_keys_requires_auth(client):
+    resp = client.get("/api/keys")
+    assert resp.status_code == 401
 
 
 if __name__ == "__main__":
