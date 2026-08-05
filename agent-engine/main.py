@@ -706,6 +706,132 @@ async def delete_user_data(contact_id: str, client_id: int = 1):
     return {"status": "deleted" if success else "failed"}
 
 # ---------------------------------------------------------------------------
+# WhatsApp Connection Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/whatsapp/qr")
+async def whatsapp_qr(user: User = Depends(get_current_user)):
+    """Get WhatsApp QR code for connection (requires bridge running)."""
+    import httpx
+    bridge_url = settings.whatsapp_bridge_url or "http://localhost:3001"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{bridge_url}/health", timeout=5)
+            if resp.status_code == 200:
+                # Bridge is running — try to get QR
+                # The bridge generates QR on startup; we return a placeholder
+                # In production, this would fetch the actual QR from bridge
+                return {
+                    "qr_image": None,
+                    "message": "WhatsApp bridge is running. QR code is displayed in the bridge terminal. Scan it with your WhatsApp.",
+                    "bridge_status": "running"
+                }
+            return {"qr_image": None, "message": "WhatsApp bridge not running", "bridge_status": "offline"}
+    except Exception:
+        return {
+            "qr_image": None,
+            "message": "WhatsApp bridge is not running. Start it with: cd whatsapp-bridge && node bridge.js",
+            "bridge_status": "offline"
+        }
+
+
+@app.get("/api/whatsapp/status")
+async def whatsapp_status(user: User = Depends(get_current_user)):
+    """Check WhatsApp connection status."""
+    import httpx
+    bridge_url = settings.whatsapp_bridge_url or "http://localhost:3001"
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{bridge_url}/health", timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                return {
+                    "connected": data.get("whatsapp", {}).get("number") is not None,
+                    "number": data.get("whatsapp", {}).get("number", ""),
+                    "name": data.get("whatsapp", {}).get("name", ""),
+                    "bridge_status": "running"
+                }
+            return {"connected": False, "bridge_status": "offline"}
+    except Exception:
+        return {"connected": False, "bridge_status": "offline"}
+
+
+@app.post("/api/whatsapp/api-key")
+async def save_whatsapp_api_key(request: Request, user: User = Depends(get_current_user)):
+    """Save optional WhatsApp Business API key for the user."""
+    body = await request.json()
+    api_key = body.get("api_key", "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="api_key required")
+    # Store in user's business profile
+    from business_profiles import business_manager
+    cid = _get_my_client_id(user)
+    for p in business_manager.profiles.values():
+        if p.client_id == cid:
+            # Store API key (in production, encrypt this)
+            p.whatsapp_api_key = api_key
+            business_manager._save()
+            return {"status": "saved", "message": "WhatsApp API key saved"}
+    raise HTTPException(status_code=404, detail="Create business profile first")
+
+
+# ---------------------------------------------------------------------------
+# API Key Management Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/keys")
+async def get_api_keys(user: User = Depends(get_current_user)):
+    """Get all API keys for the current user (masked)."""
+    from business_profiles import business_manager
+    cid = _get_my_client_id(user)
+    keys = {
+        "telegram_bot_token": "",
+        "whatsapp_api_key": "",
+        "razorpay_key_id": "",
+        "figma_api_token": "",
+        "webhook_url": "",
+    }
+    for p in business_manager.profiles.values():
+        if p.client_id == cid:
+            # Return masked keys
+            if hasattr(p, 'whatsapp_api_key') and p.whatsapp_api_key:
+                keys["whatsapp_api_key"] = p.whatsapp_api_key[:4] + "..." + p.whatsapp_api_key[-4:]
+            break
+    # Check global settings for this user's keys
+    if settings.telegram_bot_token:
+        keys["telegram_bot_token"] = "configured (global)"
+    if settings.razorpay_key_id:
+        keys["razorpay_key_id"] = settings.razorpay_key_id[:4] + "..."
+    if settings.figma_api_token:
+        keys["figma_api_token"] = "configured"
+    return {"keys": keys}
+
+
+@app.post("/api/keys/save")
+async def save_api_key(request: Request, user: User = Depends(get_current_user)):
+    """Save an API key for the current user."""
+    body = await request.json()
+    key_name = body.get("key_name", "")
+    key_value = body.get("key_value", "")
+    if not key_name or not key_value:
+        raise HTTPException(status_code=400, detail="key_name and key_value required")
+    # Store in business profile
+    from business_profiles import business_manager
+    cid = _get_my_client_id(user)
+    for p in business_manager.profiles.values():
+        if p.client_id == cid:
+            if key_name == "whatsapp_api_key":
+                p.whatsapp_api_key = key_value
+            elif key_name == "telegram_bot_token":
+                p.telegram_bot_token = key_value
+            elif key_name == "webhook_url":
+                p.webhook_url = key_value
+            business_manager._save()
+            return {"status": "saved", "key_name": key_name}
+    raise HTTPException(status_code=404, detail="Create business profile first")
+
+
+# ---------------------------------------------------------------------------
 # Figma Integration Endpoints
 # ---------------------------------------------------------------------------
 

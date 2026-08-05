@@ -71,6 +71,7 @@
             <div class="step-dot" data-step="2"></div>
             <div class="step-dot" data-step="3"></div>
             <div class="step-dot" data-step="4"></div>
+            <div class="step-dot" data-step="5"></div>
         </div>
 
         <div class="card">
@@ -102,6 +103,14 @@
                 <div class="step-title">Choose Your Business Type</div>
                 <div class="step-sub">Select the vertical that fits your business</div>
                 <div class="vertical-grid" id="verticalGrid"></div>
+                <div style="margin-top:20px;padding:16px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px">
+                    <div style="font-size:13px;color:#667781;margin-bottom:12px">🔒 Premium Services (Available after upgrade):</div>
+                    <div style="display:flex;gap:12px;flex-wrap:wrap">
+                        <div style="padding:8px 16px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;font-size:13px;color:#667781">📊 CA / Accountant</div>
+                        <div style="padding:8px 16px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;font-size:13px;color:#667781">⚖️ Lawyer / Legal</div>
+                        <div style="padding:8px 16px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;font-size:13px;color:#667781">📚 MBA Consulting</div>
+                    </div>
+                </div>
                 <div class="error-msg" id="verticalError"></div>
                 <div class="btn-row">
                     <button class="btn btn-outline" onclick="goStep(0)">← Back</button>
@@ -181,12 +190,47 @@
                 </div>
             </div>
 
-            <!-- Step 4: Go Live -->
+            <!-- Step 4: Connect WhatsApp -->
             <div class="step" id="step-4">
+                <div class="step-title">Connect Your WhatsApp</div>
+                <div class="step-sub">Scan the QR code with your WhatsApp to link your number</div>
+                <div style="text-align:center;padding:20px">
+                    <div id="qrContainer" style="display:inline-block;padding:20px;background:#fff;border-radius:16px;margin-bottom:16px">
+                        <div style="width:200px;height:200px;display:flex;align-items:center;justify-content:center;color:#999;font-size:14px" id="qrPlaceholder">Click "Generate QR" below</div>
+                    </div>
+                    <div id="qrStatus" style="font-size:14px;color:#667781;margin-bottom:16px">Not connected</div>
+                    <button class="btn btn-primary" onclick="generateQR()" id="qrBtn" style="margin-bottom:16px">📱 Generate QR Code</button>
+                </div>
+                <div style="margin-top:16px;padding:16px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px">
+                    <div style="font-size:13px;color:#667781;margin-bottom:8px">🔑 Optional: WhatsApp Business API Key</div>
+                    <div class="form-group" style="margin-bottom:8px">
+                        <input type="text" id="waApiKey" placeholder="Meta API access token (optional)" style="font-size:13px">
+                    </div>
+                    <div style="font-size:12px;color:#444">If you have official Meta WhatsApp Business API access, paste your token here. Otherwise, use the QR code above.</div>
+                </div>
+                <div class="error-msg" id="whatsappError"></div>
+                <div class="btn-row">
+                    <button class="btn btn-outline" onclick="goStep(3)">← Back</button>
+                    <button class="btn btn-primary" onclick="goStep(5)">Skip / Continue →</button>
+                </div>
+            </div>
+
+            <!-- Step 5: Go Live -->
+            <div class="step" id="step-5">
                 <div class="go-live">
                     <div class="icon">🎉</div>
-                    <h2>You're Live!</h2>
-                    <p>Your WhatsApp AI agent is ready. Share your storefront with customers.</p>
+                    <h2>You're All Set!</h2>
+                    <p>Your WhatsApp AI agent is ready. All features are now activated:</p>
+                    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:16px 0;text-align:left">
+                        <div style="padding:8px 12px;background:rgba(37,211,102,0.05);border-radius:8px;font-size:13px">✅ AI Agent</div>
+                        <div style="padding:8px 12px;background:rgba(37,211,102,0.05);border-radius:8px;font-size:13px">✅ Lead Scoring</div>
+                        <div style="padding:8px 12px;background:rgba(37,211,102,0.05);border-radius:8px;font-size:13px">✅ Broadcast Engine</div>
+                        <div style="padding:8px 12px;background:rgba(37,211,102,0.05);border-radius:8px;font-size:13px">✅ Drip Campaigns</div>
+                        <div style="padding:8px 12px;background:rgba(37,211,102,0.05);border-radius:8px;font-size:13px">✅ QR Generator</div>
+                        <div style="padding:8px 12px;background:rgba(37,211,102,0.05);border-radius:8px;font-size:13px">✅ Referral System</div>
+                        <div style="padding:8px 12px;background:rgba(37,211,102,0.05);border-radius:8px;font-size:13px">✅ Plugin Marketplace</div>
+                        <div style="padding:8px 12px;background:rgba(37,211,102,0.05);border-radius:8px;font-size:13px">✅ Multi-Channel Hub</div>
+                    </div>
                     <a class="storefront-link" id="storefrontLink" href="#" target="_blank">Loading...</a>
                     <div class="btn-row" style="justify-content:center">
                         <a href="/frontend/dashboard.html" class="btn btn-primary">📊 Go to Dashboard</a>
@@ -216,7 +260,7 @@
                 d.classList.toggle('done', i < step);
             });
             if (step === 1) loadVerticals();
-            if (step === 4) loadStorefrontLink();
+            if (step === 5) loadStorefrontLink();
         }
 
         async function signup() {
@@ -245,12 +289,79 @@
             try {
                 const res = await fetch(API + '/api/business/types');
                 const data = await res.json();
-                document.getElementById('verticalGrid').innerHTML = data.types.map(t =>
+                // Filter out premium verticals (CA, Lawyer, MBA) from public onboarding
+                const premiumTypes = ['ca', 'lawyer', 'mba'];
+                const publicTypes = data.types.filter(t => !premiumTypes.includes(t.type));
+                document.getElementById('verticalGrid').innerHTML = publicTypes.map(t =>
                     `<div class="vertical-card" onclick="selectVertical('${t.type}')" id="v-${t.type}">
                         <div class="vertical-icon">${t.icon}</div>
                         <div class="vertical-name">${t.name}</div>
                     </div>`).join('');
             } catch (e) { console.error(e); }
+        }
+
+        async function generateQR() {
+            const btn = document.getElementById('qrBtn');
+            const status = document.getElementById('qrStatus');
+            const placeholder = document.getElementById('qrPlaceholder');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Generating...';
+            status.textContent = 'Generating QR code...';
+            try {
+                const res = await fetch(API + '/api/whatsapp/qr', {
+                    headers: { 'Authorization': 'Bearer ' + token }
+                });
+                const data = await res.json();
+                if (data.qr_image) {
+                    placeholder.innerHTML = `<img src="${data.qr_image}" style="width:200px;height:200px" alt="WhatsApp QR Code">`;
+                    status.textContent = 'Scan with WhatsApp → Settings → Linked Devices → Link a Device';
+                    btn.innerHTML = '✅ Waiting for scan...';
+                    // Poll for connection status
+                    checkQRStatus();
+                } else if (data.message) {
+                    placeholder.textContent = data.message;
+                    status.textContent = 'WhatsApp bridge not running. You can connect later from Dashboard.';
+                    btn.disabled = false;
+                    btn.innerHTML = '📱 Try Again';
+                }
+            } catch (e) {
+                placeholder.textContent = 'QR generation requires WhatsApp bridge running.';
+                status.textContent = 'You can connect WhatsApp later from your Dashboard settings.';
+                btn.disabled = false;
+                btn.innerHTML = '📱 Try Again';
+            }
+        }
+
+        let qrPollInterval = null;
+        async function checkQRStatus() {
+            if (qrPollInterval) clearInterval(qrPollInterval);
+            qrPollInterval = setInterval(async () => {
+                try {
+                    const res = await fetch(API + '/api/whatsapp/status', {
+                        headers: { 'Authorization': 'Bearer ' + token }
+                    });
+                    const data = await res.json();
+                    if (data.connected) {
+                        clearInterval(qrPollInterval);
+                        document.getElementById('qrStatus').textContent = '✅ WhatsApp Connected!';
+                        document.getElementById('qrBtn').innerHTML = '✅ Connected';
+                        document.getElementById('qrBtn').disabled = true;
+                        // Save API key if provided
+                        const apiKey = document.getElementById('waApiKey').value.trim();
+                        if (apiKey) await saveWhatsAppApiKey(apiKey);
+                    }
+                } catch (e) { /* keep polling */ }
+            }, 3000);
+        }
+
+        async function saveWhatsAppApiKey(apiKey) {
+            try {
+                await fetch(API + '/api/me/business', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                    body: JSON.stringify({ whatsapp_api_key: apiKey })
+                });
+            } catch (e) { console.error('Failed to save API key'); }
         }
 
         function selectVertical(type) {
