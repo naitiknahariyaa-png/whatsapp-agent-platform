@@ -146,6 +146,46 @@ def test_frontend_robots_exists():
     assert os.path.exists(robots_path)
 
 
+def test_frontend_terms_exists():
+    terms_path = os.path.join(_AGENT_DIR, "..", "frontend", "terms.html")
+    assert os.path.exists(terms_path)
+    with open(terms_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "Terms & Conditions" in content
+    assert "secondary phone" in content.lower() or "secondary number" in content.lower()
+    assert "FREE" in content
+
+
+def test_frontend_privacy_exists():
+    privacy_path = os.path.join(_AGENT_DIR, "..", "frontend", "privacy.html")
+    assert os.path.exists(privacy_path)
+    with open(privacy_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "Privacy Policy" in content
+    assert "encrypted" in content.lower()
+
+
+def test_dashboard_has_health_section():
+    dashboard_path = os.path.join(_AGENT_DIR, "..", "frontend", "dashboard.html")
+    assert os.path.exists(dashboard_path)
+    with open(dashboard_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "section-health" in content
+    assert "Account Health" in content
+    assert "chat-toggle" in content
+    assert "checkHealth" in content
+    assert "section-analytics" in content
+
+
+def test_sitemap_has_terms_privacy():
+    sitemap_path = os.path.join(_AGENT_DIR, "..", "frontend", "sitemap.xml")
+    assert os.path.exists(sitemap_path)
+    with open(sitemap_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "terms.html" in content
+    assert "privacy.html" in content
+
+
 def test_frontend_onboarding_premium():
     onboarding_path = os.path.join(_AGENT_DIR, "..", "frontend", "onboarding.html")
     assert os.path.exists(onboarding_path)

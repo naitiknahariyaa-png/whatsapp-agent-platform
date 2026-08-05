@@ -92,6 +92,17 @@
                     <input type="password" id="password" placeholder="••••••••">
                 </div>
                 <div class="error-msg" id="signupError"></div>
+                <div style="margin-top:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:10px">
+                    <div style="display:flex;align-items:flex-start;gap:8px">
+                        <input type="checkbox" id="agreeToS" style="margin-top:2px">
+                        <label for="agreeToS" style="font-size:13px;color:#a0a0b0">
+                            I agree to the <a href="/terms.html" target="_blank" style="color:#25D366">Terms & Conditions</a> and
+                            <a href="/privacy.html" target="_blank" style="color:#25D366">Privacy Policy</a>.
+                            <span style="color:#ff6b6b;font-weight:600">⚠️ Warning: Use a secondary phone number, not your main number. WhatsApp may ban your account if you use unofficial bridges.</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="error-msg" id="signupError"></div>
                 <div class="btn-row">
                     <a href="/frontend/login.html" class="btn btn-outline">Already have account? Login</a>
                     <button class="btn btn-primary" onclick="signup()">Create Account →</button>
