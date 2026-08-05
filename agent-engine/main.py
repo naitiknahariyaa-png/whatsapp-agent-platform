@@ -77,7 +77,25 @@ async def lifespan(app: FastAPI):
     from scheduler import start_scheduler, stop_scheduler
     await start_scheduler()
 
+    # Start Telegram bot bridge if token is configured
+    if settings.telegram_bot_token and settings.telegram_bot_token != "your_telegram_bot_token_here":
+        try:
+            import asyncio
+            from telegram_bridge import main as telegram_main
+            app.state.telegram_task = asyncio.create_task(telegram_main())
+            logger.info("[v] Telegram bot bridge started")
+        except Exception as e:
+            logger.error(f"[!] Failed to start Telegram bridge: {e}")
+    else:
+        logger.info("[i] Telegram bridge not started (no token configured)")
+
     yield
+
+    # Cancel telegram task on shutdown
+    telegram_task = getattr(app.state, 'telegram_task', None)
+    if telegram_task:
+        telegram_task.cancel()
+        logger.info("[i] Telegram bridge stopped")
 
     await stop_scheduler()
     logger.info("[i] Shutting down...")
@@ -489,30 +507,33 @@ async def razorpay_webhook(request: Request):
 # ---------------------------------------------------------------------------
 
 @app.get("/api/leads/stats")
-async def lead_stats(client_id: int = 1):
-    """Get lead scoring statistics"""
+async def lead_stats(user: User = Depends(get_current_user)):
+    """Get lead scoring statistics (tenant-scoped)."""
     from lead_scoring import scoring_engine
-    return scoring_engine.get_stats(client_id)
+    cid = _get_my_client_id(user)
+    return scoring_engine.get_stats(cid)
 
 @app.get("/api/leads")
-async def list_leads(tier: str = "", limit: int = 10, client_id: int = 1):
-    """List leads, optionally filtered by tier"""
+async def list_leads(tier: str = "", limit: int = 10, user: User = Depends(get_current_user)):
+    """List leads, optionally filtered by tier (tenant-scoped)."""
     from lead_scoring import scoring_engine, LeadTier
+    cid = _get_my_client_id(user)
     if tier:
         try:
             t = LeadTier(tier)
-            leads = scoring_engine.get_leads_by_tier(t, client_id)
+            leads = scoring_engine.get_leads_by_tier(t, cid)
         except ValueError:
             return {"error": f"Invalid tier: {tier}. Use: hot, warm, cold, dead"}
     else:
-        leads = scoring_engine.get_top_leads(limit, client_id)
+        leads = scoring_engine.get_top_leads(limit, cid)
     return {"leads": [l.to_dict() for l in leads]}
 
 @app.get("/api/leads/{contact_id}")
-async def get_lead(contact_id: str, client_id: int = 1):
-    """Get lead profile and score"""
+async def get_lead(contact_id: str, user: User = Depends(get_current_user)):
+    """Get lead profile and score (tenant-scoped)."""
     from lead_scoring import scoring_engine
-    profile = scoring_engine.get_profile(contact_id, client_id)
+    cid = _get_my_client_id(user)
+    profile = scoring_engine.get_profile(contact_id, cid)
     return profile.to_dict()
 
 @app.post("/api/qr/create")
@@ -606,6 +627,41 @@ async def webhook_logs(endpoint_id: str = ""):
     from public_api import webhook_manager
     return {"logs": webhook_manager.get_delivery_log(endpoint_id or None)}
 
+@app.post("/api/telegram/send")
+async def telegram_send(request: Request, user: User = Depends(get_current_user)):
+    """Send a message via Telegram (requires TELEGRAM_BOT_TOKEN)."""
+    if not settings.telegram_bot_token or settings.telegram_bot_token == "your_telegram_bot_token_here":
+        raise HTTPException(status_code=400, detail="Telegram bot not configured")
+    body = await request.json()
+    chat_id = body.get("chat_id", "")
+    text = body.get("text", "")
+    if not chat_id or not text:
+        raise HTTPException(status_code=400, detail="chat_id and text required")
+    import httpx
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(
+                f"https://api.telegram.org/bot{settings.telegram_bot_token}/sendMessage",
+                json={"chat_id": chat_id, "text": text},
+                timeout=10
+            )
+            if resp.status_code != 200:
+                raise HTTPException(status_code=502, detail=f"Telegram API error: {resp.text}")
+            return {"status": "sent", "chat_id": chat_id}
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Telegram send failed: {e}")
+
+
+@app.get("/api/telegram/status")
+async def telegram_status(user: User = Depends(get_current_user)):
+    """Get Telegram bridge status."""
+    telegram_task = getattr(app.state, 'telegram_task', None)
+    return {
+        "configured": bool(settings.telegram_bot_token and settings.telegram_bot_token != "your_telegram_bot_token_here"),
+        "running": telegram_task is not None and not telegram_task.done(),
+    }
+
+
 @app.get("/api/status")
 async def status_page():
     """Generate status page HTML"""
@@ -614,6 +670,7 @@ async def status_page():
         "API Server": "up",
         "Database": "up",
         "WhatsApp Bridge": "up" if os.path.exists(os.path.join(os.path.dirname(__file__), "..", "whatsapp-bridge", "bridge.js")) else "unknown",
+        "Telegram Bridge": "up" if (settings.telegram_bot_token and settings.telegram_bot_token != "your_telegram_bot_token_here") else "not_configured",
         "Redis": "down" if not get_state_machine()._available else "up",
     }
     html = status_page.generate_html(component_status)
@@ -649,6 +706,36 @@ async def delete_user_data(contact_id: str, client_id: int = 1):
     return {"status": "deleted" if success else "failed"}
 
 # ---------------------------------------------------------------------------
+# Figma Integration Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/figma/status")
+async def figma_status():
+    """Check Figma integration status."""
+    from figma_integration import figma_integration
+    return {
+        "configured": figma_integration.configured,
+        "file_key": settings.figma_file_key or "",
+    }
+
+@app.post("/api/figma/sync")
+async def figma_sync(user: User = Depends(get_current_user)):
+    """Sync design tokens from the configured Figma file."""
+    from figma_integration import figma_integration
+    tokens = await figma_integration.sync_tokens()
+    if "error" in tokens:
+        raise HTTPException(status_code=400, detail=tokens["error"])
+    # Apply as theme
+    result = await figma_integration.apply_theme(tokens)
+    return {**result, "tokens": tokens}
+
+@app.get("/api/figma/tokens")
+async def figma_tokens(user: User = Depends(get_current_user)):
+    """Get cached design tokens from the last sync."""
+    from figma_integration import figma_integration
+    return figma_integration.get_cached_tokens()
+
+# ---------------------------------------------------------------------------
 # Business Profile & Catalog & Orders & Themes
 # ---------------------------------------------------------------------------
 
@@ -671,10 +758,12 @@ async def get_business_template(business_type: str):
 
 
 @app.post("/api/business/create")
-async def create_business_profile(request: Request):
+async def create_business_profile(request: Request, user: User = Depends(get_current_user)):
     """Create a new business profile"""
     from business_profiles import BusinessProfile, BusinessType, BusinessTemplate, business_manager
     body = await request.json()
+    body["client_id"] = user.client_id or user.id
+    body["owner_id"] = str(user.id)
     try:
         bt = BusinessType(body.get("business_type", "custom"))
     except ValueError:
@@ -707,31 +796,42 @@ async def create_business_profile(request: Request):
 
 
 @app.get("/api/business/{business_id}")
-async def get_business_profile(business_id: str):
+async def get_business_profile(business_id: str, user: User = Depends(get_current_user)):
     """Get a business profile"""
     from business_profiles import business_manager
     profile = business_manager.get_profile(business_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Business not found")
+    # Check ownership
+    if user.role != Role.ADMIN.value and profile.client_id != (user.client_id or user.id):
+        raise HTTPException(status_code=403, detail="Access denied")
     return profile.to_dict()
 
 
 @app.put("/api/business/{business_id}")
-async def update_business_profile(business_id: str, request: Request):
+async def update_business_profile(business_id: str, request: Request, user: User = Depends(get_current_user)):
     """Update a business profile"""
     from business_profiles import business_manager
     body = await request.json()
-    profile = business_manager.update_profile(business_id, **body)
+    profile = business_manager.get_profile(business_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Business not found")
+    if user.role != Role.ADMIN.value and profile.client_id != (user.client_id or user.id):
+        raise HTTPException(status_code=403, detail="Access denied")
+    profile = business_manager.update_profile(business_id, **body)
     return {"status": "updated", "business": profile.to_dict()}
 
 
 @app.post("/api/business/{business_id}/catalog/add")
-async def add_catalog_item(business_id: str, request: Request):
+async def add_catalog_item(business_id: str, request: Request, user: User = Depends(get_current_user)):
     """Add an item to the catalog"""
     from business_profiles import CatalogItem, business_manager
     body = await request.json()
+    profile = business_manager.get_profile(business_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Business not found")
+    if user.role != Role.ADMIN.value and profile.client_id != (user.client_id or user.id):
+        raise HTTPException(status_code=403, detail="Access denied")
     item = CatalogItem(
         id=str(uuid.uuid4())[:8],
         business_id=business_id,

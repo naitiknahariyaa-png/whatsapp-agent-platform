@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     llm_model: str = "llama-3.3-70b-versatile"
     llm_provider: str = "groq"
     ollama_base_url: str = "http://localhost:11434"
-    database_url: str = "postgresql+asyncpg://wap_user:wap_pass_123@localhost:5432/wap_crm"
+    database_url: str = "sqlite+aiosqlite:///./wap.db"
     redis_url: str = "redis://localhost:6379/0"
     chroma_host: str = "localhost"
     chroma_port: int = 8001
@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     razorpay_key_id: str = ""
     razorpay_key_secret: str = ""
     telegram_bot_token: str = ""
+    figma_api_token: str = ""
+    figma_file_key: str = ""
     jwt_secret_key: str = ""
     host: str = "0.0.0.0"
     port: int = 8000
