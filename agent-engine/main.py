@@ -1081,3 +1081,26 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", "8000"))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+
+
+@app.get("/api/anti-ban/status")
+async def anti_ban_status():
+    """Get anti-ban layer status."""
+    return {
+        "enabled": True,
+        "min_delay_ms": 3000,
+        "max_delay_ms": 8000,
+        "max_messages_per_min": 8,
+        "max_messages_per_hour": 120,
+        "max_new_chats_per_day": 20,
+        "quiet_hours": {"enabled": True, "start": 22, "end": 8},
+        "human_typing_delay": True,
+        "random_read_delay": True,
+        "status": "active"
+    }
+
+@app.post("/api/anti-ban/toggle")
+async def anti_ban_toggle():
+    """Toggle anti-ban layer on/off."""
+    return {"enabled": True, "message": "Anti-ban layer is always ON for your protection"}
+

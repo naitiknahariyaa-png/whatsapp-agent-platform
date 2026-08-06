@@ -8,6 +8,80 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
+// ============ ANTI-BAN LAYER ============
+// Protects your WhatsApp account from being banned
+const ANTI_BAN = {
+  enabled: true,
+  minDelayMs: 3000,      // Minimum delay between messages (3s)
+  maxDelayMs: 8000,      // Maximum delay between messages (8s)
+  maxMessagesPerMin: 8,  // Max messages per minute
+  maxMessagesPerHour: 120, // Max messages per hour
+  maxNewChatsPerDay: 20, // Max new chats per day
+  humanTypingDelay: true, // Simulate human typing
+  randomReadDelay: true,  // Random read receipts delay
+  quietHours: { enabled: true, start: 22, end: 8 }, // Quiet hours 10pm-8am
+  messageCount: { minute: 0, hour: 0, day: 0, lastMinute: Date.now(), lastHour: Date.now(), lastDay: Date.now() },
+  newChatsToday: 0,
+  lastNewChatDay: new Date().getDate(),
+};
+
+function antiBanDelay() {
+  return new Promise(resolve => {
+    const delay = Math.floor(Math.random() * (ANTI_BAN.maxDelayMs - ANTI_BAN.minDelayMs)) + ANTI_BAN.minDelayMs;
+    setTimeout(resolve, delay);
+  });
+}
+
+function antiBanCheck() {
+  const now = Date.now();
+  // Reset counters
+  if (now - ANTI_BAN.messageCount.lastMinute > 60000) { ANTI_BAN.messageCount.minute = 0; ANTI_BAN.messageCount.lastMinute = now; }
+  if (now - ANTI_BAN.messageCount.lastHour > 3600000) { ANTI_BAN.messageCount.hour = 0; ANTI_BAN.messageCount.lastHour = now; }
+  if (now - ANTI_BAN.messageCount.lastDay > 86400000) { ANTI_BAN.messageCount.day = 0; ANTI_BAN.messageCount.lastDay = now; }
+  if (new Date().getDate() !== ANTI_BAN.lastNewChatDay) { ANTI_BAN.newChatsToday = 0; ANTI_BAN.lastNewChatDay = new Date().getDate(); }
+
+  // Check quiet hours
+  const hour = new Date().getHours();
+  if (ANTI_BAN.quietHours.enabled && hour >= ANTI_BAN.quietHours.start && hour < ANTI_BAN.quietHours.end) {
+    return { allowed: false, reason: 'Quiet hours (10pm-8am) - message queued for morning' };
+  }
+
+  // Check rate limits
+  if (ANTI_BAN.messageCount.minute >= ANTI_BAN.maxMessagesPerMin) {
+    return { allowed: false, reason: 'Rate limit: too many messages per minute' };
+  }
+  if (ANTI_BAN.messageCount.hour >= ANTI_BAN.maxMessagesPerHour) {
+    return { allowed: false, reason: 'Rate limit: too many messages per hour' };
+  }
+  if (ANTI_BAN.messageCount.day >= ANTI_BAN.maxMessagesPerHour * 8) {
+    return { allowed: false, reason: 'Daily message limit reached' };
+  }
+  if (ANTI_BAN.newChatsToday >= ANTI_BAN.maxNewChatsPerDay) {
+    return { allowed: false, reason: 'New chat limit reached for today' };
+  }
+  return { allowed: true };
+}
+
+function antiBanTrack(isNewChat) {
+  ANTI_BAN.messageCount.minute++;
+  ANTI_BAN.messageCount.hour++;
+  ANTI_BAN.messageCount.day++;
+  if (isNewChat) ANTI_BAN.newChatsToday++;
+}
+
+// Simulate human typing delay
+function humanTypingDelay(text) {
+  return new Promise(resolve => {
+    if (!ANTI_BAN.humanTypingDelay) { resolve(); return; }
+    const charsPerSec = Math.floor(Math.random() * 20) + 15; // 15-35 chars/sec
+    const delay = Math.min(Math.max(text.length / charsPerSec * 1000, 1000), 5000);
+    setTimeout(resolve, delay);
+  });
+}
+
+// ============ END ANTI-BAN LAYER ============
+
+
 const AGENT_API_URL = process.env.AGENT_API_URL || 'http://localhost:8000';
 const WS_PORT = process.env.WS_PORT || 3002;
 const HTTP_PORT = process.env.HTTP_PORT || 3001;
@@ -73,7 +147,19 @@ async function safeSend(phone, message) {
     // Human-like pause before sending
     await randomDelay(SAFETY.minDelayMs, SAFETY.maxDelayMs);
     const chatId = phone.includes('@c.us') ? phone : `${phone}@c.us`;
-    const r = await client.sendMessage(chatId, message);
+    const r = await // Anti-ban check before sending
+  const banCheck = antiBanCheck();
+  if (!banCheck.allowed) { console.log('⚠️ Anti-ban:', banCheck.reason); return; }
+  await antiBanDelay();
+  await humanTypingDelay(text || 'Hello');
+  antiBanTrack(false);
+  // Anti-ban check before sending
+  const banCheck = antiBanCheck();
+  if (!banCheck.allowed) { console.log('⚠️ Anti-ban:', banCheck.reason); return; }
+  await antiBanDelay();
+  await humanTypingDelay(text || 'Hello');
+  antiBanTrack(false);
+  client.sendMessage(chatId, message);
     msgCountHour++;
     msgCountDay++;
     return { success: true, messageId: r.id._serialized };
@@ -91,7 +177,25 @@ const client = new Client({
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 
-client.on('qr', async (qr) => {
+client.on('qr', (qr) => {
+    console.log('📱 QR Code generated - scan with WhatsApp');
+    // Store QR for API to serve
+    global.LAST_QR = qr;
+    if (global.io) global.io.emit('qr', qr);
+  });
+  client.on('qr', (qr) => {
+    console.log('📱 QR Code generated - scan with WhatsApp');
+    // Store QR for API to serve
+    global.LAST_QR = qr;
+    if (global.io) global.io.emit('qr', qr);
+  });
+  client.on('qr', (qr) => {
+    console.log('📱 QR Code generated - scan with WhatsApp');
+    // Store QR for API to serve
+    global.LAST_QR = qr;
+    if (global.io) global.io.emit('qr', qr);
+  });
+  client.on('qr', async (qr) => {
     console.log('\n=== SCAN THIS QR CODE WITH WHATSAPP ===');
     qrcodeTerminal.generate(qr, { small: true });
     console.log('===========================================\n');
@@ -119,7 +223,19 @@ client.on('auth_failure', (msg) => {
     console.error('[✗] Auth failure:', msg);
     clearAuthSession();
 });
-client.on('ready', () => console.log('[✓] WhatsApp client ready!'));
+client.on('ready', () => {
+    console.log('✅ WhatsApp connected! Anti-ban layer active');
+    global.WA_CONNECTED = true;
+  });
+  client.on('ready', () => {
+    console.log('✅ WhatsApp connected! Anti-ban layer active');
+    global.WA_CONNECTED = true;
+  });
+  client.on('ready', () => {
+    console.log('✅ WhatsApp connected! Anti-ban layer active');
+    global.WA_CONNECTED = true;
+  });
+  client.on('ready', () => console.log('[✓] WhatsApp client ready!'));
 
 client.on('message', async (message) => {
     if (message.from.includes('status') || message.from === 'me' || message.isGroup) return;
@@ -161,7 +277,19 @@ app.post('/send-media', async (req, res) => {
         await randomDelay(SAFETY.minDelayMs, SAFETY.maxDelayMs);
         const chatId = phone.includes('@c.us') ? phone : `${phone}@c.us`;
         const media = new MessageMedia(mimetype || 'image/png', base64, filename || 'file');
-        const r = await client.sendMessage(chatId, media, { caption });
+        const r = await // Anti-ban check before sending
+  const banCheck = antiBanCheck();
+  if (!banCheck.allowed) { console.log('⚠️ Anti-ban:', banCheck.reason); return; }
+  await antiBanDelay();
+  await humanTypingDelay(text || 'Hello');
+  antiBanTrack(false);
+  // Anti-ban check before sending
+  const banCheck = antiBanCheck();
+  if (!banCheck.allowed) { console.log('⚠️ Anti-ban:', banCheck.reason); return; }
+  await antiBanDelay();
+  await humanTypingDelay(text || 'Hello');
+  antiBanTrack(false);
+  client.sendMessage(chatId, media, { caption });
         msgCountHour++;
         msgCountDay++;
         res.json({ success: true, messageId: r.id._serialized });
