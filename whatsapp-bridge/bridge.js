@@ -9,17 +9,15 @@ const fs = require('fs');
 const path = require('path');
 
 // ============ ANTI-BAN LAYER ============
-// Protects your WhatsApp account from being banned
 const ANTI_BAN = {
   enabled: true,
-  minDelayMs: 3000,      // Minimum delay between messages (3s)
-  maxDelayMs: 8000,      // Maximum delay between messages (8s)
-  maxMessagesPerMin: 8,  // Max messages per minute
-  maxMessagesPerHour: 120, // Max messages per hour
-  maxNewChatsPerDay: 20, // Max new chats per day
-  humanTypingDelay: true, // Simulate human typing
-  randomReadDelay: true,  // Random read receipts delay
-  quietHours: { enabled: true, start: 22, end: 8 }, // Quiet hours 10pm-8am
+  minDelayMs: 3000,
+  maxDelayMs: 8000,
+  maxMessagesPerMin: 8,
+  maxMessagesPerHour: 120,
+  maxNewChatsPerDay: 20,
+  humanTypingDelay: true,
+  quietHours: { enabled: true, start: 22, end: 8 },
   messageCount: { minute: 0, hour: 0, day: 0, lastMinute: Date.now(), lastHour: Date.now(), lastDay: Date.now() },
   newChatsToday: 0,
   lastNewChatDay: new Date().getDate(),
@@ -34,31 +32,17 @@ function antiBanDelay() {
 
 function antiBanCheck() {
   const now = Date.now();
-  // Reset counters
   if (now - ANTI_BAN.messageCount.lastMinute > 60000) { ANTI_BAN.messageCount.minute = 0; ANTI_BAN.messageCount.lastMinute = now; }
   if (now - ANTI_BAN.messageCount.lastHour > 3600000) { ANTI_BAN.messageCount.hour = 0; ANTI_BAN.messageCount.lastHour = now; }
   if (now - ANTI_BAN.messageCount.lastDay > 86400000) { ANTI_BAN.messageCount.day = 0; ANTI_BAN.messageCount.lastDay = now; }
   if (new Date().getDate() !== ANTI_BAN.lastNewChatDay) { ANTI_BAN.newChatsToday = 0; ANTI_BAN.lastNewChatDay = new Date().getDate(); }
-
-  // Check quiet hours
   const hour = new Date().getHours();
   if (ANTI_BAN.quietHours.enabled && hour >= ANTI_BAN.quietHours.start && hour < ANTI_BAN.quietHours.end) {
-    return { allowed: false, reason: 'Quiet hours (10pm-8am) - message queued for morning' };
+    return { allowed: false, reason: 'Quiet hours (10pm-8am)' };
   }
-
-  // Check rate limits
-  if (ANTI_BAN.messageCount.minute >= ANTI_BAN.maxMessagesPerMin) {
-    return { allowed: false, reason: 'Rate limit: too many messages per minute' };
-  }
-  if (ANTI_BAN.messageCount.hour >= ANTI_BAN.maxMessagesPerHour) {
-    return { allowed: false, reason: 'Rate limit: too many messages per hour' };
-  }
-  if (ANTI_BAN.messageCount.day >= ANTI_BAN.maxMessagesPerHour * 8) {
-    return { allowed: false, reason: 'Daily message limit reached' };
-  }
-  if (ANTI_BAN.newChatsToday >= ANTI_BAN.maxNewChatsPerDay) {
-    return { allowed: false, reason: 'New chat limit reached for today' };
-  }
+  if (ANTI_BAN.messageCount.minute >= ANTI_BAN.maxMessagesPerMin) return { allowed: false, reason: 'Rate limit: too many messages per minute' };
+  if (ANTI_BAN.messageCount.hour >= ANTI_BAN.maxMessagesPerHour) return { allowed: false, reason: 'Rate limit: too many messages per hour' };
+  if (ANTI_BAN.newChatsToday >= ANTI_BAN.maxNewChatsPerDay) return { allowed: false, reason: 'New chat limit reached for today' };
   return { allowed: true };
 }
 
@@ -69,100 +53,28 @@ function antiBanTrack(isNewChat) {
   if (isNewChat) ANTI_BAN.newChatsToday++;
 }
 
-// Simulate human typing delay
 function humanTypingDelay(text) {
   return new Promise(resolve => {
     if (!ANTI_BAN.humanTypingDelay) { resolve(); return; }
-    const charsPerSec = Math.floor(Math.random() * 20) + 15; // 15-35 chars/sec
-    const delay = Math.min(Math.max(text.length / charsPerSec * 1000, 1000), 5000);
+    const charsPerSec = Math.floor(Math.random() * 20) + 15;
+    const delay = Math.min(Math.max((text || 'Hello').length / charsPerSec * 1000, 1000), 5000);
     setTimeout(resolve, delay);
   });
 }
-
 // ============ END ANTI-BAN LAYER ============
-
 
 const AGENT_API_URL = process.env.AGENT_API_URL || 'http://localhost:8000';
 const WS_PORT = process.env.WS_PORT || 3002;
 const HTTP_PORT = process.env.HTTP_PORT || 3001;
-
 const AUTH_PATH = path.join(__dirname, '.wwebjs_auth');
 const QR_FILE_PATH = path.join(__dirname, 'qr.png');
 
 function clearAuthSession() {
     try {
         if (fs.existsSync(AUTH_PATH)) {
-            console.log('[ℹ] Clearing WhatsApp session cache...');
             fs.rmSync(AUTH_PATH, { recursive: true, force: true });
-            console.log('[✓] Session cache cleared.');
         }
-    } catch (e) {
-        console.error('[!] Failed to clear session cache:', e.message);
-    }
-}
-
-// ============================================================
-// ANTI-BAN SAFETY LAYER
-// Protects the WhatsApp number from being flagged/banned
-// ============================================================
-const SAFETY = {
-    minDelayMs: 8000,            // 8 sec min between messages
-    maxDelayMs: 15000,           // 15 sec max (random jitter)
-    typingDelayMs: [3000, 7000], // typing indicator before reply
-    maxPerHour: 50,              // hard cap per hour
-    maxPerDay: 500,              // hard cap per day
-    broadcastDrip: {
-        batchSize: 5,            // 5 msgs per batch
-        pauseMs: 1800000         // 30 min pause between batches
-    }
-};
-
-// Message counters (in-memory, resets on restart)
-let msgCountHour = 0;
-let msgCountDay = 0;
-let hourStart = Date.now();
-let dayStart = Date.now();
-
-function randomDelay(min, max) {
-    return new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * (max - min + 1)) + min));
-}
-
-function checkRateLimit() {
-    const now = Date.now();
-    if (now - hourStart > 3600000) { msgCountHour = 0; hourStart = now; }
-    if (now - dayStart > 86400000) { msgCountDay = 0; dayStart = now; }
-    if (msgCountHour >= SAFETY.maxPerHour) {
-        console.log(`[!] Hourly limit reached (${msgCountHour}/${SAFETY.maxPerHour}). Waiting 1 hour...`);
-        return false;
-    }
-    if (msgCountDay >= SAFETY.maxPerDay) {
-        console.log(`[!] Daily limit reached (${msgCountDay}/${SAFETY.maxPerDay}). Stopping for today.`);
-        return false;
-    }
-    return true;
-}
-
-async function safeSend(phone, message) {
-    if (!checkRateLimit()) return { success: false, error: 'rate_limit' };
-    // Human-like pause before sending
-    await randomDelay(SAFETY.minDelayMs, SAFETY.maxDelayMs);
-    const chatId = phone.includes('@c.us') ? phone : `${phone}@c.us`;
-    const r = await // Anti-ban check before sending
-  const banCheck = antiBanCheck();
-  if (!banCheck.allowed) { console.log('⚠️ Anti-ban:', banCheck.reason); return; }
-  await antiBanDelay();
-  await humanTypingDelay(text || 'Hello');
-  antiBanTrack(false);
-  // Anti-ban check before sending
-  const banCheck = antiBanCheck();
-  if (!banCheck.allowed) { console.log('⚠️ Anti-ban:', banCheck.reason); return; }
-  await antiBanDelay();
-  await humanTypingDelay(text || 'Hello');
-  antiBanTrack(false);
-  client.sendMessage(chatId, message);
-    msgCountHour++;
-    msgCountDay++;
-    return { success: true, messageId: r.id._serialized };
+    } catch (e) { console.error('[!] Clear session failed:', e.message); }
 }
 
 const client = new Client({
@@ -174,68 +86,37 @@ const client = new Client({
     }
 });
 
-const app = express();
-app.use(express.json({ limit: '50mb' }));
+// Store latest QR globally for API
+let latestQR = null;
 
-client.on('qr', (qr) => {
-    console.log('📱 QR Code generated - scan with WhatsApp');
-    // Store QR for API to serve
-    global.LAST_QR = qr;
-    if (global.io) global.io.emit('qr', qr);
-  });
-  client.on('qr', (qr) => {
-    console.log('📱 QR Code generated - scan with WhatsApp');
-    // Store QR for API to serve
-    global.LAST_QR = qr;
-    if (global.io) global.io.emit('qr', qr);
-  });
-  client.on('qr', (qr) => {
-    console.log('📱 QR Code generated - scan with WhatsApp');
-    // Store QR for API to serve
-    global.LAST_QR = qr;
-    if (global.io) global.io.emit('qr', qr);
-  });
-  client.on('qr', async (qr) => {
+// QR handler - save QR for API
+client.on('qr', async (qr) => {
+    latestQR = qr;
     console.log('\n=== SCAN THIS QR CODE WITH WHATSAPP ===');
     qrcodeTerminal.generate(qr, { small: true });
     console.log('===========================================\n');
-    
     try {
         await QRCode.toFile(QR_FILE_PATH, qr);
-        console.log(`[✓] Clean QR code saved as image to: ${QR_FILE_PATH}`);
-        console.log('[ℹ] Open this image file to scan if the terminal version looks distorted.');
+        console.log(`[✓] QR code saved to: ${QR_FILE_PATH}`);
     } catch (err) {
-        console.error('[!] Failed to generate qr.png:', err.message);
+        console.error('[!] Failed to save qr.png:', err.message);
     }
 });
 
 client.on('authenticated', () => {
     console.log('[✓] WhatsApp authenticated');
-    // Remove old qr.png when authenticated
-    try {
-        if (fs.existsSync(QR_FILE_PATH)) {
-            fs.unlinkSync(QR_FILE_PATH);
-        }
-    } catch (e) {}
+    try { if (fs.existsSync(QR_FILE_PATH)) fs.unlinkSync(QR_FILE_PATH); } catch (e) {}
 });
 
 client.on('auth_failure', (msg) => {
     console.error('[✗] Auth failure:', msg);
     clearAuthSession();
 });
+
 client.on('ready', () => {
     console.log('✅ WhatsApp connected! Anti-ban layer active');
     global.WA_CONNECTED = true;
-  });
-  client.on('ready', () => {
-    console.log('✅ WhatsApp connected! Anti-ban layer active');
-    global.WA_CONNECTED = true;
-  });
-  client.on('ready', () => {
-    console.log('✅ WhatsApp connected! Anti-ban layer active');
-    global.WA_CONNECTED = true;
-  });
-  client.on('ready', () => console.log('[✓] WhatsApp client ready!'));
+});
 
 client.on('message', async (message) => {
     if (message.from.includes('status') || message.from === 'me' || message.isGroup) return;
@@ -248,9 +129,9 @@ client.on('message', async (message) => {
             body: message.body
         }, { timeout: 30000 });
         if (resp.data.reply) {
-            // Anti-ban: show typing indicator for 3-7 sec before replying
+            // Typing indicator
             await client.sendPresenceAvailable();
-            await randomDelay(SAFETY.typingDelayMs[0], SAFETY.typingDelayMs[1]);
+            await new Promise(r => setTimeout(r, Math.floor(Math.random() * 4000) + 3000));
             await safeSend(message.from, resp.data.reply);
             console.log(`[OUT] ${message.from}: ${resp.data.reply.substring(0, 50)}...`);
         }
@@ -258,6 +139,30 @@ client.on('message', async (message) => {
         if (err.code !== 'ECONNREFUSED') console.error(`[✗] Error: ${err.message}`);
     }
 });
+
+async function safeSend(phone, message) {
+    // Anti-ban check
+    const banCheck = antiBanCheck();
+    if (!banCheck.allowed) {
+        console.log('[!] Anti-ban:', banCheck.reason);
+        return { success: false, error: banCheck.reason };
+    }
+    await antiBanDelay();
+    await humanTypingDelay(message);
+    antiBanTrack(false);
+
+    try {
+        const chatId = phone.includes('@c.us') ? phone : `${phone}@c.us`;
+        const r = await client.sendMessage(chatId, message);
+        return { success: true, messageId: r.id._serialized };
+    } catch (e) {
+        console.error('[✗] Send failed:', e.message);
+        return { success: false, error: e.message };
+    }
+}
+
+const app = express();
+app.use(express.json({ limit: '50mb' }));
 
 app.post('/send', async (req, res) => {
     const { phone, message } = req.body;
@@ -272,28 +177,28 @@ app.post('/send', async (req, res) => {
 app.post('/send-media', async (req, res) => {
     const { phone, base64, mimetype, caption, filename } = req.body;
     if (!phone || !base64) return res.status(400).json({ error: 'phone and base64 required' });
-    if (!checkRateLimit()) return res.status(429).json({ error: 'rate_limit' });
     try {
-        await randomDelay(SAFETY.minDelayMs, SAFETY.maxDelayMs);
         const chatId = phone.includes('@c.us') ? phone : `${phone}@c.us`;
         const media = new MessageMedia(mimetype || 'image/png', base64, filename || 'file');
-        const r = await // Anti-ban check before sending
-  const banCheck = antiBanCheck();
-  if (!banCheck.allowed) { console.log('⚠️ Anti-ban:', banCheck.reason); return; }
-  await antiBanDelay();
-  await humanTypingDelay(text || 'Hello');
-  antiBanTrack(false);
-  // Anti-ban check before sending
-  const banCheck = antiBanCheck();
-  if (!banCheck.allowed) { console.log('⚠️ Anti-ban:', banCheck.reason); return; }
-  await antiBanDelay();
-  await humanTypingDelay(text || 'Hello');
-  antiBanTrack(false);
-  client.sendMessage(chatId, media, { caption });
-        msgCountHour++;
-        msgCountDay++;
-        res.json({ success: true, messageId: r.id._serialized });
+        const result = await safeSend(phone, caption || '');
+        if (!result.success) return res.status(429).json({ error: result.error });
+        // Send media separately
+        await client.sendMessage(chatId, media);
+        res.json({ success: true, messageId: result.messageId });
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// QR endpoint - return latest QR or placeholder
+app.get('/qr', (req, res) => {
+    if (latestQR) {
+        QRCode.toDataURL(latestQR).then(url => {
+            res.json({ qr: latestQR, data_url: url, status: 'ready' });
+        }).catch(() => {
+            res.json({ qr: latestQR, data_url: null, status: 'ready' });
+        });
+    } else {
+        res.json({ qr: null, data_url: null, status: 'waiting' });
+    }
 });
 
 app.get('/health', (req, res) => {
@@ -303,6 +208,10 @@ app.get('/health', (req, res) => {
 const wss = new WebSocketServer({ port: WS_PORT });
 wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ type: 'connected', message: 'WhatsApp Bridge Connected' }));
+    // Send QR if available
+    if (latestQR) {
+        ws.send(JSON.stringify({ type: 'qr', data: latestQR }));
+    }
 });
 
 app.listen(HTTP_PORT, () => console.log(`[ℹ] Bridge HTTP on :${HTTP_PORT}, WS on :${WS_PORT}`));

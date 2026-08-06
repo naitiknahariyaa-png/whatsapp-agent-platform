@@ -732,17 +732,17 @@ async def whatsapp_qr(user: User = Depends(get_current_user)):
     bridge_url = settings.whatsapp_bridge_url or "http://localhost:3001"
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{bridge_url}/health", timeout=5)
+            resp = await client.get(f"{bridge_url}/qr", timeout=5)
             if resp.status_code == 200:
-                # Bridge is running — try to get QR
-                # The bridge generates QR on startup; we return a placeholder
-                # In production, this would fetch the actual QR from bridge
+                data = resp.json()
                 return {
-                    "qr_image": None,
-                    "message": "WhatsApp bridge is running. QR code is displayed in the bridge terminal. Scan it with your WhatsApp.",
+                    "qr_image": data.get("data_url"),
+                    "qr_raw": data.get("qr"),
+                    "status": data.get("status", "unknown"),
+                    "message": "Scan this QR with WhatsApp" if data.get("status") == "ready" else "Waiting for QR... Open the bridge terminal to scan",
                     "bridge_status": "running"
                 }
-            return {"qr_image": None, "message": "WhatsApp bridge not running", "bridge_status": "offline"}
+            return {"qr_image": None, "message": "WhatsApp bridge not responding", "bridge_status": "offline"}
     except Exception:
         return {
             "qr_image": None,
