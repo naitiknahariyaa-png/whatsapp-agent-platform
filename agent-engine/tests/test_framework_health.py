@@ -116,12 +116,11 @@ def test_frontend_dashboard_has_analytics():
     with open(dashboard_path, "r", encoding="utf-8") as f:
         content = f.read()
     assert "section-analytics" in content
-    assert "revenueChart" in content
-    assert "funnelChart" in content
+    assert "anRevenueChart" in content
+    assert "anFunnelChart" in content
     assert "section-keys" in content
     assert "section-whatsapp" in content
     assert "chart.js" in content
-
 
 def test_frontend_index_seo():
     index_path = os.path.join(_AGENT_DIR, "..", "frontend", "index.html")
@@ -238,6 +237,75 @@ def test_whatsapp_status_requires_auth(client):
 def test_api_keys_requires_auth(client):
     resp = client.get("/api/keys")
     assert resp.status_code == 401
+
+
+
+
+def test_dashboard_has_all_new_features():
+    """Test that dashboard has all the new feature sections."""
+    dashboard_path = os.path.join(_AGENT_DIR, "..", "frontend", "dashboard.html")
+    assert os.path.exists(dashboard_path)
+    with open(dashboard_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    # Core sections
+    assert "section-dashboard" in content
+    assert "section-profile" in content
+    assert "section-catalog" in content
+    assert "section-orders" in content
+    # Growth sections
+    assert "section-analytics" in content
+    assert "section-crm" in content
+    assert "section-segmentation" in content
+    assert "section-appointments" in content
+    assert "section-invoices" in content
+    assert "section-refunds" in content
+    assert "section-billing" in content
+    assert "section-referral" in content
+    # Team & Comms
+    assert "section-inbox" in content
+    assert "section-widget" in content
+    assert "section-qr" in content
+    # AI & Intelligence
+    assert "section-voice" in content
+    assert "section-image" in content
+    assert "section-language" in content
+    assert "section-sentiment" in content
+    assert "section-finetune" in content
+    assert "section-knowledge" in content
+    assert "section-replay" in content
+    assert "section-prompt" in content
+    # Developer
+    assert "section-webhooks" in content
+    assert "section-sdk" in content
+    assert "section-plugin" in content
+    assert "section-cli" in content
+    assert "section-docs" in content
+    # Settings
+    assert "section-templates" in content
+    assert "section-theme" in content
+    assert "section-keys" in content
+    assert "section-whatsapp" in content
+    assert "section-health" in content
+    assert "section-storefront" in content
+    # Chatbot
+    assert "chat-toggle" in content
+    assert "chat-window" in content
+    assert "sendChat" in content
+    # Dark theme
+    assert "--bg: #0a0a0f" in content
+    assert "--surface: #14141c" in content
+
+
+def test_onboarding_has_skip_and_warning():
+    """Test that onboarding has skip button and secondary phone warning."""
+    onboarding_path = os.path.join(_AGENT_DIR, "..", "frontend", "onboarding.html")
+    assert os.path.exists(onboarding_path)
+    with open(onboarding_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "skipVertical" in content
+    assert "Skip this step" in content
+    assert "secondary phone" in content.lower()
+    assert "Premium Services" in content
 
 
 if __name__ == "__main__":

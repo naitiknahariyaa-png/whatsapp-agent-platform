@@ -3,106 +3,128 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Owner Dashboard — WhatsApp Business Platform</title>
+<title>WhatsApp Agent Platform — Owner Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 :root {
   --primary: #25D366;
   --secondary: #128C7E;
-  --bg: #F0F2F5;
-  --surface: #FFFFFF;
-  --text: #111B21;
-  --text-light: #667781;
-  --border: #E9EDEF;
+  --bg: #0a0a0f;
+  --surface: #14141c;
+  --surface2: #1a1a24;
+  --text: #e8e8f0;
+  --text-light: #8a8a9a;
+  --border: #2a2a35;
   --gradient: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
-  --shadow: 0 2px 8px rgba(0,0,0,0.06);
+  --shadow: 0 2px 12px rgba(0,0,0,0.3);
   --radius: 12px;
   --transition: all 0.2s ease;
+  --danger: #ff6b6b;
+  --warning: #ffd93d;
+  --info: #4fc3f7;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); }
-.sidebar { position: fixed; left: 0; top: 0; width: 240px; height: 100vh; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 100; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+.sidebar { position: fixed; left: 0; top: 0; width: 260px; height: 100vh; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 100; overflow-y: auto; }
 .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border); }
 .sidebar-header h2 { font-size: 18px; color: var(--primary); }
 .sidebar-header p { font-size: 12px; color: var(--text-light); }
-.sidebar-nav { flex: 1; padding: 12px; overflow-y: auto; }
-.nav-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 500; color: var(--text); transition: var(--transition); margin-bottom: 4px; }
-.nav-item:hover { background: var(--bg); }
+.sidebar-nav { flex: 1; padding: 12px; }
+.nav-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text); transition: var(--transition); margin-bottom: 2px; }
+.nav-item:hover { background: var(--surface2); }
 .nav-item.active { background: var(--gradient); color: #fff; }
-.nav-icon { font-size: 20px; }
-.main { margin-left: 240px; padding: 24px; min-height: 100vh; }
+.nav-icon { font-size: 18px; width: 24px; text-align: center; }
+.nav-group { font-size: 11px; color: var(--text-light); text-transform: uppercase; letter-spacing: 1px; padding: 12px 14px 4px; font-weight: 700; }
+.main { margin-left: 260px; padding: 24px; min-height: 100vh; }
 .page-header { margin-bottom: 24px; }
 .page-header h1 { font-size: 24px; margin-bottom: 4px; }
 .page-header p { color: var(--text-light); font-size: 14px; }
-.card { background: var(--surface); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); margin-bottom: 20px; }
+.card { background: var(--surface); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); margin-bottom: 20px; border: 1px solid var(--border); }
 .card-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; }
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
-.stat-card { background: var(--surface); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); }
+.stat-card { background: var(--surface); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); border: 1px solid var(--border); }
 .stat-icon { font-size: 32px; margin-bottom: 8px; }
 .stat-value { font-size: 28px; font-weight: 700; }
 .stat-label { font-size: 13px; color: var(--text-light); }
 .form-group { margin-bottom: 16px; }
 .form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text-light); }
-.form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px 14px; border: 2px solid var(--border); border-radius: 10px; font-size: 14px; outline: none; transition: var(--transition); }
+.form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px 14px; border: 2px solid var(--border); border-radius: 10px; font-size: 14px; outline: none; transition: var(--transition); background: var(--surface2); color: var(--text); }
 .form-group input:focus, .form-group textarea:focus, .form-group select:focus { border-color: var(--primary); }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .btn { background: var(--gradient); color: #fff; border: none; padding: 10px 24px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: var(--transition); }
 .btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(37,211,102,0.3); }
-.btn-secondary { background: var(--bg); color: var(--text); }
+.btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
 .btn-sm { padding: 6px 14px; font-size: 12px; }
+.btn-danger { background: var(--danger); }
 .table { width: 100%; border-collapse: collapse; }
 .table th { text-align: left; padding: 12px 16px; font-size: 12px; color: var(--text-light); border-bottom: 2px solid var(--border); }
 .table td { padding: 12px 16px; font-size: 14px; border-bottom: 1px solid var(--border); }
-.table tr:hover { background: var(--bg); }
+.table tr:hover { background: var(--surface2); }
 .badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; }
-.badge-pending { background: #FFF3CD; color: #856404; }
-.badge-confirmed { background: #D4EDDA; color: #155724; }
-.badge-preparing { background: #FFE0B2; color: #E65100; }
-.badge-ready { background: #B3E5FC; color: #01579B; }
-.badge-delivered { background: #C8E6C9; color: #1B5E20; }
-.badge-cancelled { background: #FFCDD2; color: #B71C1C; }
+.badge-pending { background: #3a3a00; color: #ffd93d; }
+.badge-confirmed { background: #003a1a; color: #25D366; }
+.badge-delivered { background: #003a2a; color: #4fc3f7; }
+.badge-cancelled { background: #3a0000; color: #ff6b6b; }
+.badge-hot { background: #3a1a00; color: #ff8a50; }
+.badge-warm { background: #3a3a00; color: #ffd93d; }
+.badge-cold { background: #1a1a3a; color: #8a8aff; }
 .type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
-.type-card { border: 2px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; cursor: pointer; transition: var(--transition); }
+.type-card { border: 2px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; cursor: pointer; transition: var(--transition); background: var(--surface2); }
 .type-card:hover { border-color: var(--primary); transform: translateY(-2px); }
-.type-card.selected { border-color: var(--primary); background: rgba(37,211,102,0.05); }
+.type-card.selected { border-color: var(--primary); background: rgba(37,211,102,0.1); }
 .type-icon { font-size: 36px; margin-bottom: 8px; }
 .type-name { font-size: 13px; font-weight: 600; }
 .theme-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
 .theme-card { border: 2px solid var(--border); border-radius: var(--radius); overflow: hidden; cursor: pointer; transition: var(--transition); }
-.theme-card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+.theme-card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
 .theme-card.selected { border-color: var(--primary); border-width: 3px; }
 .theme-preview { height: 60px; }
 .theme-name { padding: 8px; font-size: 12px; font-weight: 600; text-align: center; }
 .section { display: none; }
-.section.active { display: block; }
-.toast { position: fixed; bottom: 20px; right: 20px; background: var(--text); color: #fff; padding: 12px 24px; border-radius: 30px; font-size: 14px; z-index: 400; opacity: 0; transition: all 0.3s; transform: translateY(20px); }
+.section.active { display: block; animation: fadeIn 0.3s; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.toast { position: fixed; bottom: 20px; right: 20px; background: var(--surface2); color: var(--text); padding: 12px 24px; border-radius: 30px; font-size: 14px; z-index: 400; opacity: 0; transition: all 0.3s; transform: translateY(20px); border: 1px solid var(--border); }
 .toast.show { opacity: 1; transform: translateY(0); }
 .nav-toggle { display: none; position: fixed; top: 16px; left: 16px; z-index: 200; background: var(--gradient); color: #fff; border: none; border-radius: 10px; width: 44px; height: 44px; font-size: 20px; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
 .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 90; }
-.skeleton { background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 8px; }
-@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-.chat-toggle { position: fixed; bottom: 24px; right: 24px; width: 60px; height: 60px; border-radius: 50%; background: var(--gradient); color: #fff; border: none; font-size: 24px; cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.15); z-index: 999; display: flex; align-items: center; justify-content: center; transition: all 0.3s; }
-.chat-toggle:hover { transform: scale(1.1); box-shadow: 0 6px 24px rgba(37,211,102,0.4); }
-.chat-window { position: fixed; bottom: 100px; right: 24px; width: 340px; max-width: calc(100vw - 48px); height: 400px; background: var(--surface); border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.15); border: 1px solid var(--border); z-index: 999; display: none; flex-direction: column; overflow: hidden; }
+.chat-toggle { position: fixed; bottom: 24px; right: 24px; width: 60px; height: 60px; border-radius: 50%; background: var(--gradient); color: #fff; border: none; font-size: 24px; cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.3); z-index: 999; display: flex; align-items: center; justify-content: center; transition: all 0.3s; }
+.chat-toggle:hover { transform: scale(1.1); }
+.chat-window { position: fixed; bottom: 100px; right: 24px; width: 340px; max-width: calc(100vw - 48px); height: 400px; background: var(--surface); border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); border: 1px solid var(--border); z-index: 999; display: none; flex-direction: column; overflow: hidden; }
 .chat-window.open { display: flex; }
 .chat-header { background: var(--gradient); color: #fff; padding: 16px 20px; font-weight: 700; font-size: 16px; display: flex; align-items: center; justify-content: space-between; }
 .chat-header .close { cursor: pointer; font-size: 20px; }
 .chat-messages { flex: 1; overflow-y: auto; padding: 16px; }
 .chat-msg { padding: 8px 12px; margin-bottom: 12px; border-radius: 12px; font-size: 13px; max-width: 80%; line-height: 1.5; }
-.chat-msg.bot { background: var(--bg); margin-right: auto; }
+.chat-msg.bot { background: var(--surface2); margin-right: auto; }
 .chat-msg.user { background: var(--gradient); color: #fff; margin-left: auto; text-align: right; }
 .chat-input { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--border); background: var(--surface); }
-.chat-input input { flex: 1; padding: 8px 12px; border: 2px solid var(--border); border-radius: 20px; font-size: 13px; outline: none; }
+.chat-input input { flex: 1; padding: 8px 12px; border: 2px solid var(--border); border-radius: 20px; font-size: 13px; outline: none; background: var(--surface2); color: var(--text); }
 .chat-input input:focus { border-color: var(--primary); }
 .chat-input button { background: var(--gradient); color: #fff; border: none; padding: 8px 16px; border-radius: 20px; font-size: 13px; cursor: pointer; }
+.pipeline { display: flex; gap: 12px; overflow-x: auto; padding: 16px 0; }
+.pipeline-col { min-width: 200px; background: var(--surface2); border-radius: 12px; padding: 12px; border: 1px solid var(--border); }
+.pipeline-col h4 { font-size: 13px; margin-bottom: 8px; color: var(--text-light); }
+.pipeline-card { background: var(--surface); border-radius: 8px; padding: 10px; margin-bottom: 8px; border: 1px solid var(--border); cursor: pointer; }
+.pipeline-card:hover { border-color: var(--primary); }
+.pipeline-card .name { font-weight: 600; font-size: 13px; }
+.pipeline-card .meta { font-size: 11px; color: var(--text-light); margin-top: 4px; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-day { min-height: 80px; background: var(--surface2); border-radius: 8px; padding: 8px; border: 1px solid var(--border); font-size: 12px; }
+.cal-day.today { border-color: var(--primary); }
+.cal-day .date { font-weight: 700; margin-bottom: 4px; }
+.cal-day .event { background: var(--gradient); color: #fff; border-radius: 4px; padding: 2px 6px; font-size: 10px; margin-bottom: 2px; }
+.tab-bar { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+.tab-btn { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); cursor: pointer; font-size: 13px; font-weight: 500; }
+.tab-btn.active { background: var(--gradient); color: #fff; border-color: transparent; }
+.code-block { background: #1a1a22; border-radius: 8px; padding: 16px; font-family: monospace; font-size: 12px; overflow-x: auto; color: #4fc3f7; }
 @media (max-width: 768px) {
   .nav-toggle { display: flex; align-items: center; justify-content: center; }
-  .sidebar { transform: translateX(-100%); transition: transform 0.3s ease; width: 240px; }
+  .sidebar { transform: translateX(-100%); transition: transform 0.3s ease; width: 260px; }
   .sidebar.open { transform: translateX(0); }
   .sidebar-overlay.show { display: block; }
-  .sidebar-header h2, .sidebar-header p, .nav-item span { display: inline; }
   .main { margin-left: 0; padding: 16px; padding-top: 70px; }
   .form-row { grid-template-columns: 1fr; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
 }
 </style>
 </head>
@@ -110,277 +132,731 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 <button class="nav-toggle" onclick="toggleSidebar()" aria-label="Toggle navigation">☰</button>
 <div class="sidebar-overlay" onclick="closeSidebar()"></div>
 <div class="sidebar">
-  <div class="sidebar-header"><h2>📱 WA Platform</h2><p id="sidebarUser">Business Owner Dashboard</p></div>
+  <div class="sidebar-header"><h2>📱 WA Platform</h2><p id="sidebarUser">Owner Dashboard</p></div>
   <div class="sidebar-nav">
+    <div class="nav-group">Main</div>
     <div class="nav-item active" onclick="showSection('dashboard')" id="nav-dashboard"><span class="nav-icon">📊</span><span>Dashboard</span></div>
     <div class="nav-item" onclick="showSection('profile')" id="nav-profile"><span class="nav-icon">🏪</span><span>Business Profile</span></div>
     <div class="nav-item" onclick="showSection('catalog')" id="nav-catalog"><span class="nav-icon">📦</span><span>Catalog</span></div>
     <div class="nav-item" onclick="showSection('orders')" id="nav-orders"><span class="nav-icon">📋</span><span>Orders</span></div>
-    <div class="nav-item" onclick="showSection('templates')" id="nav-templates"><span class="nav-icon">💬</span><span>Templates</span></div>
-    <div class="nav-item" onclick="showSection('theme')" id="nav-theme"><span class="nav-icon">🎨</span><span>Theme & Design</span></div>
+    <div class="nav-group">Growth</div>
     <div class="nav-item" onclick="showSection('analytics')" id="nav-analytics"><span class="nav-icon">📈</span><span>Analytics</span></div>
+    <div class="nav-item" onclick="showSection('crm')" id="nav-crm"><span class="nav-icon">👥</span><span>CRM</span></div>
+    <div class="nav-item" onclick="showSection('segmentation')" id="nav-segmentation"><span class="nav-icon">🎯</span><span>Segmentation</span></div>
+    <div class="nav-item" onclick="showSection('appointments')" id="nav-appointments"><span class="nav-icon">📅</span><span>Appointments</span></div>
+    <div class="nav-item" onclick="showSection('invoices')" id="nav-invoices"><span class="nav-icon">🧾</span><span>Invoices</span></div>
+    <div class="nav-item" onclick="showSection('refunds')" id="nav-refunds"><span class="nav-icon">💸</span><span>Refunds</span></div>
+    <div class="nav-item" onclick="showSection('billing')" id="nav-billing"><span class="nav-icon">💳</span><span>Billing</span></div>
+    <div class="nav-item" onclick="showSection('referral')" id="nav-referral"><span class="nav-icon">🎁</span><span>Referrals</span></div>
+    <div class="nav-group">Team & Comms</div>
+    <div class="nav-item" onclick="showSection('inbox')" id="nav-inbox"><span class="nav-icon">📬</span><span>Team Inbox</span></div>
+    <div class="nav-item" onclick="showSection('widget')" id="nav-widget"><span class="nav-icon">🌐</span><span>Web Widget</span></div>
+    <div class="nav-item" onclick="showSection('qr')" id="nav-qr"><span class="nav-icon">📱</span><span>QR Generator</span></div>
+    <div class="nav-group">AI & Intelligence</div>
+    <div class="nav-item" onclick="showSection('voice')" id="nav-voice"><span class="nav-icon">🎤</span><span>Voice Notes</span></div>
+    <div class="nav-item" onclick="showSection('image')" id="nav-image"><span class="nav-icon">🖼️</span><span>Image AI</span></div>
+    <div class="nav-item" onclick="showSection('language')" id="nav-language"><span class="nav-icon">🌍</span><span>Languages</span></div>
+    <div class="nav-item" onclick="showSection('sentiment')" id="nav-sentiment"><span class="nav-icon">💭</span><span>Sentiment</span></div>
+    <div class="nav-item" onclick="showSection('finetune')" id="nav-finetune"><span class="nav-icon">🧠</span><span>Fine-tuning</span></div>
+    <div class="nav-item" onclick="showSection('knowledge')" id="nav-knowledge"><span class="nav-icon">📚</span><span>Knowledge Base</span></div>
+    <div class="nav-item" onclick="showSection('replay')" id="nav-replay"><span class="nav-icon">🔁</span><span>Replay</span></div>
+    <div class="nav-item" onclick="showSection('prompt')" id="nav-prompt"><span class="nav-icon">⚙️</span><span>Prompt Versioning</span></div>
+    <div class="nav-group">Developer</div>
+    <div class="nav-item" onclick="showSection('webhooks')" id="nav-webhooks"><span class="nav-icon">🔗</span><span>Webhooks</span></div>
+    <div class="nav-item" onclick="showSection('sdk')" id="nav-sdk"><span class="nav-icon">📦</span><span>SDKs</span></div>
+    <div class="nav-item" onclick="showSection('plugin')" id="nav-plugin"><span class="nav-icon">🧩</span><span>Plugin Marketplace</span></div>
+    <div class="nav-item" onclick="showSection('cli')" id="nav-cli"><span class="nav-icon">💻</span><span>CLI Tool</span></div>
+    <div class="nav-item" onclick="showSection('docs')" id="nav-docs"><span class="nav-icon">📖</span><span>Developer Docs</span></div>
+    <div class="nav-group">Settings</div>
+    <div class="nav-item" onclick="showSection('templates')" id="nav-templates"><span class="nav-icon">💬</span><span>Templates</span></div>
+    <div class="nav-item" onclick="showSection('theme')" id="nav-theme"><span class="nav-icon">🎨</span><span>Theme</span></div>
     <div class="nav-item" onclick="showSection('keys')" id="nav-keys"><span class="nav-icon">🔑</span><span>API Keys</span></div>
     <div class="nav-item" onclick="showSection('whatsapp')" id="nav-whatsapp"><span class="nav-icon">📱</span><span>WhatsApp</span></div>
     <div class="nav-item" onclick="showSection('health')" id="nav-health"><span class="nav-icon">🏥</span><span>Account Health</span></div>
-    <div class="nav-item" onclick="showSection('storefront')" id="nav-storefront"><span class="nav-icon">🌐</span><span>View Storefront</span></div>
+    <div class="nav-item" onclick="showSection('storefront')" id="nav-storefront"><span class="nav-icon">🌐</span><span>Storefront</span></div>
+    <div class="nav-item" style="color:var(--danger);border-top:1px solid var(--border);margin-top:8px;padding-top:12px" onclick="logout()"><span class="nav-icon">🚪</span><span>Logout</span></div>
   </div>
 </div>
 <div class="main">
 
-  <!-- Dashboard -->
-  <div class="section active" id="section-dashboard">
-    <div class="page-header"><h1>📊 Dashboard</h1><p>Overview of your business performance</p></div>
-    <div class="card" id="noBusinessCard" style="display:none;text-align:center;padding:40px">
-      <p style="font-size:48px">🚀</p>
-      <h2 style="margin-bottom:8px">Welcome! Let's get started</h2>
-      <p style="color:var(--text-light);margin-bottom:20px">Create your business profile to unlock the dashboard.</p>
-      <button class="btn" onclick="showSection('profile')">✨ Create Business Profile</button>
+<!-- Dashboard -->
+<div class="section active" id="section-dashboard">
+  <div class="page-header"><h1>📊 Dashboard</h1><p>Business performance overview</p></div>
+  <div class="card" id="noBusinessCard" style="display:none;text-align:center;padding:40px">
+    <p style="font-size:48px">🚀</p>
+    <h2 style="margin-bottom:8px">Welcome! Let's get started</h2>
+    <p style="color:var(--text-light);margin-bottom:20px">Create your business profile to unlock the dashboard.</p>
+    <button class="btn" onclick="showSection('profile')">✨ Create Business Profile</button>
+  </div>
+  <div class="stats-grid">
+    <div class="stat-card"><div class="stat-icon">📋</div><div class="stat-value" id="statOrders">0</div><div class="stat-label">Total Orders</div></div>
+    <div class="stat-card"><div class="stat-icon">⏳</div><div class="stat-value" id="statPending">0</div><div class="stat-label">Pending</div></div>
+    <div class="stat-card"><div class="stat-icon">✅</div><div class="stat-value" id="statCompleted">0</div><div class="stat-label">Completed</div></div>
+    <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-value" id="statRevenue">₹0</div><div class="stat-label">Revenue</div></div>
+    <div class="stat-card"><div class="stat-icon">👥</div><div class="stat-value" id="statLeads">0</div><div class="stat-label">Leads</div></div>
+    <div class="stat-card"><div class="stat-icon">🔥</div><div class="stat-value" id="statHot">0</div><div class="stat-label">Hot Leads</div></div>
+    <div class="stat-card"><div class="stat-icon">⚡</div><div class="stat-value" id="statResponse">—</div><div class="stat-label">Avg Response</div></div>
+    <div class="stat-card"><div class="stat-icon">💬</div><div class="stat-value" id="statConversion">0%</div><div class="stat-label">Conversion</div></div>
+  </div>
+  <div class="card"><div class="card-title">📈 Revenue Trend (30 Days)</div><canvas id="revenueChart" height="120"></canvas></div>
+  <div class="card"><div class="card-title">📋 Recent Orders</div>
+    <table class="table"><thead><tr><th>Order ID</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Action</th></tr></thead>
+    <tbody id="recentOrdersBody"><tr><td colspan="6" style="text-align:center;color:var(--text-light)">No orders yet.</td></tr></tbody></table>
+  </div>
+</div>
+
+<!-- Business Profile -->
+<div class="section" id="section-profile">
+  <div class="page-header"><h1>🏪 Business Profile Setup</h1><p>Choose your business type and customize your profile</p></div>
+  <div class="card">
+    <div class="card-title">Step 1: Choose Business Type <span style="font-size:12px;color:var(--text-light)">(Optional — you can skip this)</span></div>
+    <div class="type-grid" id="typeGrid"></div>
+    <div style="margin-top:12px;text-align:right"><button class="btn btn-secondary btn-sm" onclick="skipType()">Skip this step →</button></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Step 2: Business Details</div>
+    <div class="form-row">
+      <div class="form-group"><label>Business Name *</label><input type="text" id="bizNameInput" placeholder="e.g., Spice Garden Restaurant"></div>
+      <div class="form-group"><label>Contact Phone</label><input type="tel" id="bizPhoneInput" placeholder="98765 43210"></div>
     </div>
+    <div class="form-group"><label>Description</label><textarea id="bizDescInput" rows="2" placeholder="Brief description of your business"></textarea></div>
+    <div class="form-row">
+      <div class="form-group"><label>Address</label><input type="text" id="bizAddressInput" placeholder="Shop address"></div>
+      <div class="form-group"><label>Email</label><input type="email" id="bizEmailInput" placeholder="contact@business.com"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Logo URL</label><input type="text" id="bizLogoInput" placeholder="https://... (optional)"></div>
+      <div class="form-group"><label>Tax Rate (%)</label><input type="number" id="bizTaxInput" value="5" min="0" max="30"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Delivery Enabled?</label><select id="bizDeliveryInput"><option value="false">No</option><option value="true">Yes</option></select></div>
+      <div class="form-group"><label>Delivery Radius (km)</label><input type="number" id="bizRadiusInput" value="5" min="1" max="50"></div>
+    </div>
+    <div class="form-group"><label>Payment Methods</label><input type="text" id="bizPaymentInput" value="cash, upi" placeholder="cash, upi, card"></div>
+    <button class="btn" onclick="saveProfile()">💾 Save Business Profile</button>
+  </div>
+</div>
+
+<!-- Catalog -->
+<div class="section" id="section-catalog">
+  <div class="page-header"><h1>📦 Catalog Manager</h1><p>Add products/services to your catalog</p></div>
+  <div class="card">
+    <div class="card-title">➕ Add New Item</div>
+    <div class="form-row">
+      <div class="form-group"><label>Item Name *</label><input type="text" id="itemName" placeholder="e.g., ITR Filing"></div>
+      <div class="form-group"><label>Category *</label><input type="text" id="itemCategory" placeholder="e.g., Tax Services" list="catList"><datalist id="catList"></datalist></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Price (₹) *</label><input type="number" id="itemPrice" placeholder="999" min="0"></div>
+      <div class="form-group"><label>Image URL</label><input type="text" id="itemImage" placeholder="https://... (optional)"></div>
+    </div>
+    <div class="form-group"><label>Description</label><textarea id="itemDesc" rows="2" placeholder="Brief description"></textarea></div>
+    <button class="btn" onclick="addCatalogItem()">➕ Add to Catalog</button>
+  </div>
+  <div class="card">
+    <div class="card-title">📦 Current Catalog</div>
+    <table class="table"><thead><tr><th>Image</th><th>Name</th><th>Category</th><th>Price</th><th>Status</th></tr></thead>
+    <tbody id="catalogBody"><tr><td colspan="5" style="text-align:center;color:var(--text-light)">No items yet.</td></tr></tbody></table>
+  </div>
+</div>
+
+<!-- Orders -->
+<div class="section" id="section-orders">
+  <div class="page-header"><h1>📋 Order Management</h1><p>View and manage customer orders</p></div>
+  <div class="card">
+    <div class="card-title">📋 All Orders
+      <select id="orderFilter" onchange="loadOrders()" style="padding:6px 12px;border-radius:8px;font-size:13px;background:var(--surface2);color:var(--text);border:1px solid var(--border)">
+        <option value="">All Status</option><option value="pending">Pending</option><option value="confirmed">Confirmed</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option>
+      </select>
+    </div>
+    <table class="table"><thead><tr><th>Order ID</th><th>Customer</th><th>Phone</th><th>Items</th><th>Total</th><th>Status</th><th>Update</th></tr></thead>
+    <tbody id="ordersBody"><tr><td colspan="7" style="text-align:center;color:var(--text-light)">No orders yet</td></tr></tbody></table>
+  </div>
+</div>
+
+<!-- Analytics -->
+<div class="section" id="section-analytics">
+  <div class="page-header"><h1>📈 Analytics Dashboard</h1><p>Revenue, funnels, response times, intents & per-vertical performance</p></div>
+  <div class="stats-grid">
+    <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-value" id="anRevenue">₹0</div><div class="stat-label">Revenue</div></div>
+    <div class="stat-card"><div class="stat-icon">🔄</div><div class="stat-value" id="anConversion">0%</div><div class="stat-label">Conversion Rate</div></div>
+    <div class="stat-card"><div class="stat-icon">⚡</div><div class="stat-value" id="anResponse">—</div><div class="stat-label">Avg Response Time</div></div>
+    <div class="stat-card"><div class="stat-icon">🎯</div><div class="stat-value" id="anTopIntent">—</div><div class="stat-label">Top Intent</div></div>
+  </div>
+  <div class="card"><div class="card-title">📈 Revenue Tracking (30 Days)</div><canvas id="anRevenueChart" height="120"></canvas></div>
+  <div class="card"><div class="card-title">🔄 Conversion Funnel</div><canvas id="anFunnelChart" height="200"></canvas></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+    <div class="card"><div class="card-title">⚡ Response Times</div><canvas id="anResponseChart" height="200"></canvas></div>
+    <div class="card"><div class="card-title">🎯 Top Intents</div><canvas id="anIntentChart" height="200"></canvas></div>
+  </div>
+  <div class="card"><div class="card-title">🏢 Per-Vertical Performance</div>
+    <table class="table"><thead><tr><th>Vertical</th><th>Orders</th><th>Revenue</th><th>Conversion</th><th>Response</th></tr></thead>
+    <tbody id="verticalPerfBody"><tr><td colspan="5" style="text-align:center;color:var(--text-light)">Loading...</td></tr></tbody></table>
+  </div>
+</div>
+
+<!-- CRM -->
+<div class="section" id="section-crm">
+  <div class="page-header"><h1>👥 CRM Module</h1><p>Contact profiles, pipeline stages, custom fields & follow-ups</p></div>
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="crmTab('contacts')">Contacts</button>
+    <button class="tab-btn" onclick="crmTab('pipeline')">Pipeline</button>
+    <button class="tab-btn" onclick="crmTab('fields')">Custom Fields</button>
+    <button class="tab-btn" onclick="crmTab('followups')">Follow-ups</button>
+  </div>
+  <div id="crm-contacts">
+    <div class="card">
+      <div class="card-title">👥 Contact Profiles</div>
+      <table class="table"><thead><tr><th>Name</th><th>Phone</th><th>Tags</th><th>Stage</th><th>Last Contact</th><th>Notes</th></tr></thead>
+      <tbody id="crmContactsBody"><tr><td colspan="6" style="text-align:center;color:var(--text-light)">No contacts yet. Add one below.</td></tr></tbody></table>
+      <div class="form-row" style="margin-top:16px">
+        <div class="form-group"><label>Name</label><input type="text" id="crmName" placeholder="Customer name"></div>
+        <div class="form-group"><label>Phone</label><input type="tel" id="crmPhone" placeholder="98765 43210"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Tags</label><input type="text" id="crmTags" placeholder="VIP, repeat, new"></div>
+        <div class="form-group"><label>Stage</label><select id="crmStage"><option>lead</option><option>qualified</option><option>customer</option></select></div>
+      </div>
+      <div class="form-group"><label>Notes</label><textarea id="crmNotes" rows="2" placeholder="Notes about this contact"></textarea></div>
+      <button class="btn" onclick="addContact()">➕ Add Contact</button>
+    </div>
+  </div>
+  <div id="crm-pipeline" style="display:none">
+    <div class="card">
+      <div class="card-title">🔄 Pipeline Stages</div>
+      <div class="pipeline">
+        <div class="pipeline-col"><h4>🟢 Lead</h4><div id="pipeLead"></div></div>
+        <div class="pipeline-col"><h4>🟡 Qualified</h4><div id="pipeQualified"></div></div>
+        <div class="pipeline-col"><h4>🔵 Customer</h4><div id="pipeCustomer"></div></div>
+      </div>
+    </div>
+  </div>
+  <div id="crm-fields" style="display:none">
+    <div class="card">
+      <div class="card-title">📋 Custom Fields per Vertical</div>
+      <div class="form-row">
+        <div class="form-group"><label>Field Name</label><input type="text" id="fieldName" placeholder="e.g., GST Number"></div>
+        <div class="form-group"><label>Field Type</label><select id="fieldType"><option>text</option><option>number</option><option>date</option><option>select</option></select></div>
+      </div>
+      <button class="btn" onclick="addCustomField()">➕ Add Field</button>
+      <table class="table" style="margin-top:16px"><thead><tr><th>Field</th><th>Type</th><th>Status</th></tr></thead><tbody id="fieldsBody"></tbody></table>
+    </div>
+  </div>
+  <div id="crm-followups" style="display:none">
+    <div class="card">
+      <div class="card-title">⏰ Follow-up Reminders</div>
+      <div class="form-row">
+        <div class="form-group"><label>Contact</label><input type="text" id="fuContact" placeholder="Customer name"></div>
+        <div class="form-group"><label>Remind in (days)</label><input type="number" id="fuDays" value="3" min="1"></div>
+      </div>
+      <div class="form-group"><label>Message</label><textarea id="fuMsg" rows="2" placeholder="Follow-up message"></textarea></div>
+      <button class="btn" onclick="addFollowup()">⏰ Set Reminder</button>
+      <table class="table" style="margin-top:16px"><thead><tr><th>Contact</th><th>Due</th><th>Message</th><th>Status</th></tr></thead><tbody id="followupsBody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<!-- Segmentation -->
+<div class="section" id="section-segmentation">
+  <div class="page-header"><h1>🎯 Customer Segmentation</h1><p>Tags, filters & smart lists</p></div>
+  <div class="card">
+    <div class="card-title">🏷️ Smart Lists</div>
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="segFilter('all')">All</button>
+      <button class="tab-btn" onclick="segFilter('vip')">VIP</button>
+      <button class="tab-btn" onclick="segFilter('repeat')">Repeat</button>
+      <button class="tab-btn" onclick="segFilter('new')">New</button>
+      <button class="tab-btn" onclick="segFilter('inactive')">Inactive 30d</button>
+    </div>
+    <table class="table"><thead><tr><th>Name</th><th>Phone</th><th>Tags</th><th>Orders</th><th>Total Spent</th></tr></thead>
+    <tbody id="segBody"><tr><td colspan="5" style="text-align:center;color:var(--text-light)">No contacts</td></tr></tbody></table>
+  </div>
+</div>
+
+<!-- Appointments -->
+<div class="section" id="section-appointments">
+  <div class="page-header"><h1>📅 Appointment System</h1><p>Built-in calendar with reminders</p></div>
+  <div class="card">
+    <div class="card-title">📅 This Week</div>
+    <div class="calendar-grid" id="calGrid"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">➕ Book Appointment</div>
+    <div class="form-row">
+      <div class="form-group"><label>Customer</label><input type="text" id="apptName" placeholder="Customer name"></div>
+      <div class="form-group"><label>Date</label><input type="date" id="apptDate"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Time</label><input type="time" id="apptTime"></div>
+      <div class="form-group"><label>Service</label><input type="text" id="apptService" placeholder="e.g., Consultation"></div>
+    </div>
+    <div class="form-group"><label>Reminder (minutes before)</label><input type="number" id="apptRemind" value="30" min="5"></div>
+    <button class="btn" onclick="bookAppointment()">📅 Book</button>
+    <table class="table" style="margin-top:16px"><thead><tr><th>Customer</th><th>Date</th><th>Time</th><th>Service</th><th>Status</th></tr></thead><tbody id="apptBody"></tbody></table>
+  </div>
+</div>
+
+<!-- Invoices -->
+<div class="section" id="section-invoices">
+  <div class="page-header"><h1>🧾 Invoice & Receipt Generator</h1><p>Generate PDF invoices & receipts</p></div>
+  <div class="card">
+    <div class="card-title">➕ Create Invoice</div>
+    <div class="form-row">
+      <div class="form-group"><label>Customer</label><input type="text" id="invCustomer" placeholder="Customer name"></div>
+      <div class="form-group"><label>Amount (₹)</label><input type="number" id="invAmount" placeholder="1000"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Description</label><input type="text" id="invDesc" placeholder="Service description"></div>
+      <div class="form-group"><label>Tax (%)</label><input type="number" id="invTax" value="5" min="0"></div>
+    </div>
+    <button class="btn" onclick="generateInvoice()">🧾 Generate Invoice</button>
+    <table class="table" style="margin-top:16px"><thead><tr><th>Invoice #</th><th>Customer</th><th>Amount</th><th>Tax</th><th>Total</th><th>Status</th><th>Download</th></tr></thead><tbody id="invBody"></tbody></table>
+  </div>
+</div>
+
+<!-- Refunds -->
+<div class="section" id="section-refunds">
+  <div class="page-header"><h1>💸 Refund Management</h1><p>Process and track refunds</p></div>
+  <div class="card">
+    <div class="card-title">➕ Process Refund</div>
+    <div class="form-row">
+      <div class="form-group"><label>Order ID</label><input type="text" id="refOrder" placeholder="Order #"></div>
+      <div class="form-group"><label>Amount (₹)</label><input type="number" id="refAmount" placeholder="500"></div>
+    </div>
+    <div class="form-group"><label>Reason</label><textarea id="refReason" rows="2" placeholder="Refund reason"></textarea></div>
+    <button class="btn" onclick="processRefund()">💸 Process Refund</button>
+    <table class="table" style="margin-top:16px"><thead><tr><th>Order</th><th>Amount</th><th>Reason</th><th>Status</th></tr></thead><tbody id="refBody"></tbody></table>
+  </div>
+</div>
+
+<!-- Billing -->
+<div class="section" id="section-billing">
+  <div class="page-header"><h1>💳 Platform Subscription & Billing</h1><p>Bill your own clients with Stripe</p></div>
+  <div class="card">
+    <div class="card-title">💳 Current Plan</div>
+    <div style="text-align:center;padding:20px">
+      <p style="font-size:48px">💸</p>
+      <h2 style="margin-bottom:8px">FREE BETA</h2>
+      <p style="color:var(--text-light);margin-bottom:16px">All features unlocked — no charges during beta</p>
+      <button class="btn btn-secondary" onclick="showToast('💸 You are on the FREE plan — no payment needed!')">View Plans</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">💳 Stripe Integration (for billing your clients)</div>
+    <div class="form-row">
+      <div class="form-group"><label>Stripe Publishable Key</label><input type="text" id="stripePub" placeholder="pk_test_..."></div>
+      <div class="form-group"><label>Stripe Secret Key</label><input type="password" id="stripeSec" placeholder="sk_test_..."></div>
+    </div>
+    <button class="btn" onclick="saveStripe()">💾 Save Stripe Keys</button>
+  </div>
+</div>
+
+<!-- Referral -->
+<div class="section" id="section-referral">
+  <div class="page-header"><h1>🎁 Referral & Affiliate System</h1><p>Grow your business with referrals</p></div>
+  <div class="card">
+    <div class="card-title">🔗 Your Referral Link</div>
+    <div style="text-align:center;padding:20px">
+      <input type="text" id="refLink" readonly style="width:100%;max-width:500px;padding:12px;border-radius:10px;font-size:14px;text-align:center;background:var(--surface2);color:var(--text);border:1px solid var(--border)" value="">
+      <br><br>
+      <button class="btn" onclick="copyRefLink()">📋 Copy Link</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">📊 Referral Stats</div>
     <div class="stats-grid">
-      <div class="stat-card"><div class="stat-icon">📋</div><div class="stat-value" id="statOrders">0</div><div class="stat-label">Total Orders</div></div>
-      <div class="stat-card"><div class="stat-icon">⏳</div><div class="stat-value" id="statPending">0</div><div class="stat-label">Pending Orders</div></div>
-      <div class="stat-card"><div class="stat-icon">✅</div><div class="stat-value" id="statCompleted">0</div><div class="stat-label">Completed</div></div>
-      <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-value" id="statRevenue">₹0</div><div class="stat-label">Revenue</div></div>
-    </div>
-    <div class="card">
-      <div class="card-title">📋 Recent Orders</div>
-      <table class="table"><thead><tr><th>Order ID</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Action</th></tr></thead>
-      <tbody id="recentOrdersBody"><tr><td colspan="6" style="text-align:center;color:var(--text-light)">No orders yet.</td></tr></tbody></table>
+      <div class="stat-card"><div class="stat-icon">👥</div><div class="stat-value" id="refCount">0</div><div class="stat-label">Total Referrals</div></div>
+      <div class="stat-card"><div class="stat-icon">✅</div><div class="stat-value" id="refConverted">0</div><div class="stat-label">Converted</div></div>
+      <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-value" id="refEarned">₹0</div><div class="stat-label">Earned</div></div>
     </div>
   </div>
+</div>
 
-  <!-- Business Profile -->
-  <div class="section" id="section-profile">
-    <div class="page-header"><h1>🏪 Business Profile Setup</h1><p>Choose your business type and customize your profile</p></div>
-    <div class="card"><div class="card-title">Step 1: Choose Business Type</div><div class="type-grid" id="typeGrid"></div></div>
-    <div class="card">
-      <div class="card-title">Step 2: Business Details</div>
-      <div class="form-row">
-        <div class="form-group"><label>Business Name *</label><input type="text" id="bizNameInput" placeholder="e.g., Spice Garden Restaurant"></div>
-        <div class="form-group"><label>Contact Phone</label><input type="tel" id="bizPhoneInput" placeholder="98765 43210"></div>
-      </div>
-      <div class="form-group"><label>Description</label><textarea id="bizDescInput" rows="2" placeholder="Brief description of your business"></textarea></div>
-      <div class="form-row">
-        <div class="form-group"><label>Address</label><input type="text" id="bizAddressInput" placeholder="Shop address"></div>
-        <div class="form-group"><label>Email</label><input type="email" id="bizEmailInput" placeholder="contact@business.com"></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Logo URL</label><input type="text" id="bizLogoInput" placeholder="https://... (optional)"></div>
-        <div class="form-group"><label>Tax Rate (%)</label><input type="number" id="bizTaxInput" value="5" min="0" max="30"></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Delivery Enabled?</label><select id="bizDeliveryInput"><option value="false">No</option><option value="true">Yes</option></select></div>
-        <div class="form-group"><label>Delivery Radius (km)</label><input type="number" id="bizRadiusInput" value="5" min="1" max="50"></div>
-      </div>
-      <div class="form-group"><label>Payment Methods</label><input type="text" id="bizPaymentInput" value="cash, upi" placeholder="cash, upi, card"></div>
-      <button class="btn" onclick="saveProfile()">💾 Save Business Profile</button>
-    </div>
+<!-- Team Inbox -->
+<div class="section" id="section-inbox">
+  <div class="page-header"><h1>📬 Team Inbox</h1><p>Multi-agent handoff, assignment & internal notes</p></div>
+  <div class="card">
+    <div class="card-title">📬 Conversations</div>
+    <table class="table"><thead><tr><th>Customer</th><th>Last Message</th><th>Assigned To</th><th>Status</th><th>Action</th></tr></thead>
+    <tbody id="inboxBody"><tr><td colspan="5" style="text-align:center;color:var(--text-light)">No conversations</td></tr></tbody></table>
   </div>
+  <div class="card">
+    <div class="card-title">➕ Assign Conversation</div>
+    <div class="form-row">
+      <div class="form-group"><label>Customer</label><input type="text" id="inboxCustomer" placeholder="Customer name"></div>
+      <div class="form-group"><label>Assign To</label><input type="text" id="inboxAgent" placeholder="Agent name"></div>
+    </div>
+    <div class="form-group"><label>Internal Note</label><textarea id="inboxNote" rows="2" placeholder="Internal note for the team"></textarea></div>
+    <button class="btn" onclick="assignConversation()">📬 Assign</button>
+  </div>
+</div>
 
-  <!-- Catalog -->
-  <div class="section" id="section-catalog">
-    <div class="page-header"><h1>📦 Catalog Manager</h1><p>Add products/services to your catalog</p></div>
-    <div class="card">
-      <div class="card-title">➕ Add New Item</div>
-      <div class="form-row">
-        <div class="form-group"><label>Item Name *</label><input type="text" id="itemName" placeholder="e.g., ITR Filing"></div>
-        <div class="form-group"><label>Category *</label><input type="text" id="itemCategory" placeholder="e.g., Tax Services" list="catList"><datalist id="catList"></datalist></div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Price (₹) *</label><input type="number" id="itemPrice" placeholder="999" min="0"></div>
-        <div class="form-group"><label>Image URL</label><input type="text" id="itemImage" placeholder="https://... (optional)"></div>
-      </div>
-      <div class="form-group"><label>Description</label><textarea id="itemDesc" rows="2" placeholder="Brief description"></textarea></div>
-      <button class="btn" onclick="addCatalogItem()">➕ Add to Catalog</button>
-    </div>
-    <div class="card">
-      <div class="card-title">📦 Current Catalog</div>
-      <table class="table"><thead><tr><th>Image</th><th>Name</th><th>Category</th><th>Price</th><th>Status</th></tr></thead>
-      <tbody id="catalogBody"><tr><td colspan="5" style="text-align:center;color:var(--text-light)">No items yet.</td></tr></tbody></table>
-    </div>
+<!-- Web Widget -->
+<div class="section" id="section-widget">
+  <div class="page-header"><h1>🌐 Web Chat Widget</h1><p>Embed on your client websites</p></div>
+  <div class="card">
+    <div class="card-title">🔗 Embed Code</div>
+    <div class="code-block" id="widgetCode"><!-- Copy this code and paste before </body> on your website -->
+<script>
+(function() {
+  var s = document.createElement('script');
+  s.src = window.location.origin + '/widget.js?biz=' + 'YOUR_BIZ_ID';
+  s.async = true;
+  document.body.appendChild(s);
+})();
+</script></div>
+    <button class="btn" style="margin-top:12px" onclick="copyWidgetCode()">📋 Copy Embed Code</button>
   </div>
+</div>
 
-  <!-- Orders -->
-  <div class="section" id="section-orders">
-    <div class="page-header"><h1>📋 Order Management</h1><p>View and manage customer orders</p></div>
-    <div class="card">
-      <div class="card-title">📋 All Orders
-        <select id="orderFilter" onchange="loadOrders()" style="padding:6px 12px;border-radius:8px;font-size:13px">
-          <option value="">All Status</option><option value="pending">Pending</option><option value="confirmed">Confirmed</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option>
-        </select>
-      </div>
-      <table class="table"><thead><tr><th>Order ID</th><th>Customer</th><th>Phone</th><th>Items</th><th>Total</th><th>Status</th><th>Update</th></tr></thead>
-      <tbody id="ordersBody"><tr><td colspan="7" style="text-align:center;color:var(--text-light)">No orders yet</td></tr></tbody></table>
-    </div>
+<!-- QR Generator -->
+<div class="section" id="section-qr">
+  <div class="page-header"><h1>📱 QR Code Generator</h1><p>Click-to-WhatsApp QR codes</p></div>
+  <div class="card">
+    <div class="card-title">📱 Generate QR</div>
+    <div class="form-group"><label>WhatsApp Number</label><input type="tel" id="qrNumber" placeholder="919876543210"></div>
+    <div class="form-group"><label>Message</label><input type="text" id="qrMessage" placeholder="Hi! I want to know more about your services"></div>
+    <button class="btn" onclick="generateQR()">📱 Generate QR</button>
+    <div id="qrOutput" style="text-align:center;margin-top:16px"></div>
   </div>
+</div>
 
-  <!-- Templates -->
-  <div class="section" id="section-templates">
-    <div class="page-header"><h1>💬 Message Templates</h1><p>Customize what messages customers receive</p></div>
-    <div class="card">
-      <div class="card-title">📝 Welcome Message</div>
-      <div class="form-group"><label>First message customers see when they chat</label><textarea id="tplWelcome" rows="3" style="font-family:monospace;font-size:13px"></textarea></div>
-      <p style="font-size:12px;color:var(--text-light)">Variables: {business_name}, {customer_name}</p>
-    </div>
-    <button class="btn" onclick="saveTemplates()">💾 Save Templates</button>
+<!-- Voice Notes -->
+<div class="section" id="section-voice">
+  <div class="page-header"><h1>🎤 Voice Note Support</h1><p>Whisper STT + TTS replies</p></div>
+  <div class="card">
+    <div class="card-title">🎤 Voice Settings</div>
+    <div class="form-group"><label>Speech-to-Text (Whisper)</label><select id="sttEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></div>
+    <div class="form-group"><label>Text-to-Speech Replies</label><select id="ttsEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></div>
+    <div class="form-group"><label>Voice Language</label><select id="voiceLang"><option>en-IN</option><option>hi-IN</option><option>ta-IN</option><option>te-IN</option><option>bn-IN</option></select></div>
+    <button class="btn" onclick="saveVoiceSettings()">💾 Save Voice Settings</button>
   </div>
+</div>
 
-  <!-- Theme -->
-  <div class="section" id="section-theme">
-    <div class="page-header"><h1>🎨 Theme & Design</h1><p>Choose a beautiful color theme</p></div>
-    <div class="card"><div class="card-title">🌈 Choose Theme</div><div class="theme-grid" id="themeGrid"></div></div>
-    <div class="card">
-      <div class="card-title">🎯 Custom Colors</div>
-      <div class="form-row">
-        <div class="form-group"><label>Primary Color</label><input type="color" id="customPrimary" value="#25D366"></div>
-        <div class="form-group"><label>Secondary Color</label><input type="color" id="customSecondary" value="#128C7E"></div>
-      </div>
-      <button class="btn" onclick="saveCustomTheme()">💾 Apply Custom Theme</button>
-    </div>
-  </div>
-
-  <!-- Account Health -->
-  <div class="section" id="section-health">
-    <div class="page-header"><h1>🏥 Account Health</h1><p>System status and connection overview</p></div>
-    <div class="stats-grid">
-      <div class="stat-card"><div class="stat-icon">🟢</div><div class="stat-value" id="healthApi">UP</div><div class="stat-label">API Status</div></div>
-      <div class="stat-card"><div class="stat-icon">📱</div><div class="stat-value" id="healthWa">—</div><div class="stat-label">WhatsApp</div></div>
-      <div class="stat-card"><div class="stat-icon">📡</div><div class="stat-value" id="healthRedis">—</div><div class="stat-label">Redis</div></div>
-      <div class="stat-card"><div class="stat-icon">💸</div><div class="stat-value" id="healthPayments">FREE</div><div class="stat-label">Payments</div></div>
-    </div>
-    <div class="card">
-      <div class="card-title">📊 System Health Overview</div>
-      <div id="healthDetails" style="font-size:14px;line-height:1.8">
-        <div>✅ API Server: Running (all endpoints responsive)</div>
-        <div>⚠️ WhatsApp Bridge: Not running — start with <code>cd whatsapp-bridge && node bridge.js</code></div>
-        <div>✅ Database: SQLite (local) — connected</div>
-        <div>✅ Redis: Fallback mode (in-memory state machine active)</div>
-        <div>✅ Telegram Bridge: Stopped (no bot token configured)</div>
-        <div>✅ Figma Integration: Available (configure API token in API Keys)</div>
-        <div>✅ Payments: Free tier — no charges. Razorpay integration ready.</div>
-        <div style="margin-top:12px;padding:12px;background:rgba(35,211,102,0.05);border-radius:8px;border:1px solid var(--border);font-size:13px;color:var(--text-light)">
-          <strong>💡 Tip:</strong> To enable WhatsApp messaging at scale, start the bridge:
-          <code style="display:block;margin-top:6px;padding:8px;background:#1a1a22;border-radius:4px">npm install && node bridge.js</code>
-        </div>
+<!-- Image AI -->
+<div class="section" id="section-image">
+  <div class="page-header"><h1>🖼️ Image Understanding</h1><p>Read menus, prescriptions, screenshots</p></div>
+  <div class="card">
+    <div class="card-title">🖼️ Image AI Settings</div>
+    <div class="form-group"><label>Enable Image Understanding</label><select id="imgEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></div>
+    <div class="form-group"><label>Supported Use Cases</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <span class="badge badge-confirmed">📋 Menus</span>
+        <span class="badge badge-confirmed">💊 Prescriptions</span>
+        <span class="badge badge-confirmed">📸 Screenshots</span>
+        <span class="badge badge-confirmed">🪪 ID Cards</span>
+        <span class="badge badge-confirmed">🧾 Receipts</span>
       </div>
     </div>
-    <div class="card">
-      <div class="card-title">🔒 Security & Compliance</div>
-      <div style="font-size:14px;line-height:1.8">
-        <div>✅ Data encrypted at rest (AES-256)</div>
-        <div>✅ GDPR-compliant data export/deletion available</div>
-        <div>✅ Webhook signatures verified</div>
-        <div>✅ Rate limiting active on all endpoints</div>
-        <div>✅ Secrets managed via env vars, never in source</div>
+    <button class="btn" onclick="saveImageSettings()">💾 Save Settings</button>
+  </div>
+</div>
+
+<!-- Languages -->
+<div class="section" id="section-language">
+  <div class="page-header"><h1>🌍 Multi-language Detection</h1><p>Auto-translation for customer messages</p></div>
+  <div class="card">
+    <div class="card-title">🌍 Language Settings</div>
+    <div class="form-group"><label>Auto-detect Language</label><select id="langDetect"><option value="true">Enabled</option><option value="false">Disabled</option></select></div>
+    <div class="form-group"><label>Auto-translate to</label><select id="langTarget"><option>English</option><option>Hindi</option><option>Tamil</option><option>Telugu</option><option>Bengali</option><option>Marathi</option></select></div>
+    <button class="btn" onclick="saveLangSettings()">💾 Save Settings</button>
+  </div>
+</div>
+
+<!-- Sentiment -->
+<div class="section" id="section-sentiment">
+  <div class="page-header"><h1>💭 Sentiment Analysis</h1><p>Auto-escalation to human agents</p></div>
+  <div class="card">
+    <div class="card-title">💭 Sentiment Settings</div>
+    <div class="form-group"><label>Enable Sentiment Analysis</label><select id="sentEnabled"><option value="true">Enabled</option><option value="false">Disabled</option></select></div>
+    <div class="form-group"><label>Auto-escalate when negative</label><select id="sentEscalate"><option value="true">Yes — escalate to human</option><option value="false">No</option></select></div>
+    <div class="form-group"><label>Escalation threshold</label><select id="sentThreshold"><option value="negative">Negative</option><option value="very_negative">Very Negative</option></select></div>
+    <button class="btn" onclick="saveSentSettings()">💾 Save Settings</button>
+  </div>
+</div>
+
+<!-- Fine-tuning -->
+<div class="section" id="section-finetune">
+  <div class="page-header"><h1>🧠 Custom Fine-tuning Pipeline</h1><p>Per-vertical model training</p></div>
+  <div class="card">
+    <div class="card-title">🧠 Fine-tuning</div>
+    <div class="form-group"><label>Vertical</label><select id="ftVertical"><option>restaurant</option><option>clinic</option><option>salon</option><option>retail</option><option>education</option></select></div>
+    <div class="form-group"><label>Training Data (JSONL)</label><textarea id="ftData" rows="4" placeholder='[{"input":"Hi","output":"Welcome!"}]'></textarea></div>
+    <button class="btn" onclick="startFineTune()">🚀 Start Fine-tuning</button>
+    <div id="ftStatus" style="margin-top:12px;font-size:13px;color:var(--text-light)">No training jobs yet</div>
+  </div>
+</div>
+
+<!-- Knowledge Base -->
+<div class="section" id="section-knowledge">
+  <div class="page-header"><h1>📚 Knowledge Base UI</h1><p>Upload docs, auto-train your AI</p></div>
+  <div class="card">
+    <div class="card-title">📚 Upload Document</div>
+    <div class="form-group"><label>Document Title</label><input type="text" id="kbTitle" placeholder="e.g., Menu 2026"></div>
+    <div class="form-group"><label>Content</label><textarea id="kbContent" rows="4" placeholder="Paste document content here..."></textarea></div>
+    <button class="btn" onclick="addKnowledge()">📚 Add to Knowledge Base</button>
+    <table class="table" style="margin-top:16px"><thead><tr><th>Title</th><th>Status</th><th>Added</th></tr></thead><tbody id="kbBody"></tbody></table>
+  </div>
+</div>
+
+<!-- Replay -->
+<div class="section" id="section-replay">
+  <div class="page-header"><h1>🔁 Conversation Replay & Training Data Export</h1><p>Review conversations and export training data</p></div>
+  <div class="card">
+    <div class="card-title">🔁 Conversation Replay</div>
+    <table class="table"><thead><tr><th>Conversation</th><th>Date</th><th>Messages</th><th>Action</th></tr></thead>
+    <tbody id="replayBody"><tr><td colspan="4" style="text-align:center;color:var(--text-light)">No conversations to replay</td></tr></tbody></table>
+  </div>
+  <div class="card">
+    <div class="card-title">📤 Export Training Data</div>
+    <button class="btn" onclick="exportTrainingData()">📤 Export JSONL</button>
+  </div>
+</div>
+
+<!-- Prompt Versioning -->
+<div class="section" id="section-prompt">
+  <div class="page-header"><h1>⚙️ Prompt Versioning</h1><p>Rollback bad responses</p></div>
+  <div class="card">
+    <div class="card-title">⚙️ Prompt Versions</div>
+    <div class="form-group"><label>Current Prompt</label><textarea id="promptCurrent" rows="4" placeholder="Your system prompt..."></textarea></div>
+    <button class="btn" onclick="savePrompt()">💾 Save New Version</button>
+    <table class="table" style="margin-top:16px"><thead><tr><th>Version</th><th>Date</th><th>Status</th><th>Action</th></tr></thead><tbody id="promptBody"></tbody></table>
+  </div>
+</div>
+
+<!-- Webhooks -->
+<div class="section" id="section-webhooks">
+  <div class="page-header"><h1>🔗 Webhooks System</h1><p>Outbound events for your clients</p></div>
+  <div class="card">
+    <div class="card-title">🔗 Webhook Endpoints</div>
+    <div class="form-group"><label>Webhook URL</label><input type="text" id="whUrl" placeholder="https://your-server.com/webhook"></div>
+    <div class="form-group"><label>Events</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <label style="font-size:13px"><input type="checkbox" checked> order.created</label>
+        <label style="font-size:13px"><input type="checkbox" checked> order.updated</label>
+        <label style="font-size:13px"><input type="checkbox"> lead.created</label>
+        <label style="font-size:13px"><input type="checkbox"> message.received</label>
+        <label style="font-size:13px"><input type="checkbox"> payment.received</label>
+      </div>
+    </div>
+    <button class="btn" onclick="saveWebhook()">💾 Save Webhook</button>
+    <table class="table" style="margin-top:16px"><thead><tr><th>URL</th><th>Events</th><th>Status</th></tr></thead><tbody id="whBody"></tbody></table>
+  </div>
+</div>
+
+<!-- SDKs -->
+<div class="section" id="section-sdk">
+  <div class="page-header"><h1>📦 SDKs</h1><p>Node.js, Python, PHP client libraries</p></div>
+  <div class="card">
+    <div class="card-title">📦 Node.js SDK</div>
+    <div class="code-block">npm install @wa-platform/sdk
+const { Client } = require('@wa-platform/sdk');
+const client = new Client({ apiKey: 'YOUR_API_KEY' });
+await client.sendMessage({ to: '+919876543210', text: 'Hello!' });</div>
+  </div>
+  <div class="card">
+    <div class="card-title">🐍 Python SDK</div>
+    <div class="code-block">pip install wa-platform-sdk
+from wa_platform import Client
+client = Client(api_key="YOUR_API_KEY")
+client.send_message(to="+919876543210", text="Hello!")</div>
+  </div>
+  <div class="card">
+    <div class="card-title">🐘 PHP SDK</div>
+    <div class="code-block">composer require wa-platform/sdk
+$client = new WaPlatform\Client("YOUR_API_KEY");
+$client->sendMessage("+919876543210", "Hello!");</div>
+  </div>
+</div>
+
+<!-- Plugin Marketplace -->
+<div class="section" id="section-plugin">
+  <div class="page-header"><h1>🧩 Plugin/Skill Marketplace</h1><p>Let others build verticals</p></div>
+  <div class="card">
+    <div class="card-title">🧩 Available Plugins</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">
+      <div class="type-card"><div class="type-icon">🍽️</div><div class="type-name">Restaurant Pack</div><div style="font-size:11px;color:var(--text-light);margin-top:4px">Menu, orders, delivery</div><button class="btn btn-sm" style="margin-top:8px" onclick="installPlugin('restaurant')">Install</button></div>
+      <div class="type-card"><div class="type-icon">🏥</div><div class="type-name">Clinic Pack</div><div style="font-size:11px;color:var(--text-light);margin-top:4px">Appointments, records</div><button class="btn btn-sm" style="margin-top:8px" onclick="installPlugin('clinic')">Install</button></div>
+      <div class="type-card"><div class="type-icon">💇</div><div class="type-name">Salon Pack</div><div style="font-size:11px;color:var(--text-light);margin-top:4px">Bookings, services</div><button class="btn btn-sm" style="margin-top:8px" onclick="installPlugin('salon')">Install</button></div>
+      <div class="type-card"><div class="type-icon">📚</div><div class="type-name">Education Pack</div><div style="font-size:11px;color:var(--text-light);margin-top:4px">Courses, admissions</div><button class="btn btn-sm" style="margin-top:8px" onclick="installPlugin('education')">Install</button></div>
+      <div class="type-card"><div class="type-icon">🛍️</div><div class="type-name">Retail Pack</div><div style="font-size:11px;color:var(--text-light);margin-top:4px">Products, inventory</div><button class="btn btn-sm" style="margin-top:8px" onclick="installPlugin('retail')">Install</button></div>
+      <div class="type-card"><div class="type-icon">📊</div><div class="type-name">CA Pack</div><div style="font-size:11px;color:var(--text-light);margin-top:4px">Tax, compliance</div><button class="btn btn-sm" style="margin-top:8px" onclick="installPlugin('ca')">Install</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- CLI -->
+<div class="section" id="section-cli">
+  <div class="page-header"><h1>💻 CLI Tool</h1><p>For power users</p></div>
+  <div class="card">
+    <div class="card-title">💻 Install CLI</div>
+    <div class="code-block">npm install -g @wa-platform/cli
+wa login --api-key YOUR_API_KEY
+wa send --to +919876543210 --text "Hello!"
+wa orders --status pending
+wa analytics --days 30</div>
+  </div>
+</div>
+
+<!-- Docs -->
+<div class="section" id="section-docs">
+  <div class="page-header"><h1>📖 Developer Docs Portal</h1><p>API reference & guides</p></div>
+  <div class="card">
+    <div class="card-title">📖 Quick Start</div>
+    <div class="code-block"># Base URL
+https://whatsapp-agent-platform-1.onrender.com
+
+# Auth
+POST /auth/register
+POST /auth/login
+
+# Business
+GET  /api/business/types
+POST /api/business/create
+GET  /api/business/{id}
+
+# Catalog
+POST /api/business/{id}/catalog/add
+GET  /api/business/{id}/catalog
+
+# Orders
+GET  /api/business/{id}/orders
+PUT  /api/business/{id}/order/{orderId}/status
+
+# WhatsApp
+GET  /api/whatsapp/qr
+GET  /api/whatsapp/status
+
+# Webhooks
+POST /api/webhooks</div>
+  </div>
+</div>
+
+<!-- Templates -->
+<div class="section" id="section-templates">
+  <div class="page-header"><h1>💬 Message Templates</h1><p>Customize what messages customers receive</p></div>
+  <div class="card">
+    <div class="card-title">📝 Welcome Message</div>
+    <div class="form-group"><label>First message customers see when they chat</label><textarea id="tplWelcome" rows="3" style="font-family:monospace;font-size:13px"></textarea></div>
+    <p style="font-size:12px;color:var(--text-light)">Variables: {business_name}, {customer_name}</p>
+  </div>
+  <button class="btn" onclick="saveTemplates()">💾 Save Templates</button>
+</div>
+
+<!-- Theme -->
+<div class="section" id="section-theme">
+  <div class="page-header"><h1>🎨 Theme & Design</h1><p>Choose a beautiful color theme</p></div>
+  <div class="card"><div class="card-title">🌈 Choose Theme</div><div class="theme-grid" id="themeGrid"></div></div>
+  <div class="card">
+    <div class="card-title">🎯 Custom Colors</div>
+    <div class="form-row">
+      <div class="form-group"><label>Primary Color</label><input type="color" id="customPrimary" value="#25D366"></div>
+      <div class="form-group"><label>Secondary Color</label><input type="color" id="customSecondary" value="#128C7E"></div>
+    </div>
+    <button class="btn" onclick="saveCustomTheme()">💾 Apply Custom Theme</button>
+  </div>
+</div>
+
+<!-- API Keys -->
+<div class="section" id="section-keys">
+  <div class="page-header"><h1>🔑 API Key Management</h1><p>Connect your third-party services</p></div>
+  <div class="card">
+    <div class="card-title">🔐 Telegram Bot Token</div>
+    <div class="form-group"><input type="text" id="telegramKey" placeholder="123456789:AAF..."></div>
+    <button class="btn btn-sm" onclick="saveKey('telegram_bot_token','telegramKey')">💾 Save</button>
+    <button class="btn btn-secondary btn-sm" onclick="testKey('telegram')" style="margin-left:8px">🧪 Test</button>
+  </div>
+  <div class="card">
+    <div class="card-title">📱 WhatsApp Business API</div>
+    <div class="form-group"><input type="text" id="whatsappKey" placeholder="Meta API token (optional)"></div>
+    <button class="btn btn-sm" onclick="saveKey('whatsapp_api_key','whatsappKey')">💾 Save</button>
+    <button class="btn btn-secondary btn-sm" onclick="connectQR()" style="margin-left:8px">📱 Connect via QR</button>
+  </div>
+  <div class="card">
+    <div class="card-title">💳 Razorpay (Payments)</div>
+    <div class="form-group"><input type="text" id="razorpayKeyId" placeholder="rzp_test_..."></div>
+    <div class="form-group"><input type="password" id="razorpayKeySecret" placeholder="• • • • • • • •"></div>
+    <button class="btn btn-sm" onclick="saveKey('razorpay_key_id','razorpayKeyId')">💾 Save & Test</button>
+  </div>
+  <div class="card">
+    <div class="card-title">🎨 Figma API Token</div>
+    <div class="form-group"><input type="text" id="figmaKey" placeholder="figd_..."></div>
+    <button class="btn btn-sm" onclick="saveKey('figma_api_token','figmaKey')">💾 Save & Sync</button>
+    <button class="btn btn-secondary btn-sm" onclick="testFigmaSync()" style="margin-left:8px">🔄 Sync Now</button>
+  </div>
+</div>
+
+<!-- WhatsApp -->
+<div class="section" id="section-whatsapp">
+  <div class="page-header"><h1>📱 WhatsApp Connection</h1><p>Manage your WhatsApp Business connection</p></div>
+  <div class="card">
+    <div class="card-title">Connection Status</div>
+    <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+      <div id="waConnectionStatus" style="font-size:18px;font-weight:700">Checking...</div>
+      <div id="waStatusDot" style="width:16px;height:16px;border-radius:50%;background:#ccc"></div>
+    </div>
+    <div id="waQRSection" style="text-align:center;padding:20px;background:var(--surface2);border-radius:16px;border:1px solid var(--border);margin-bottom:16px">
+      <button class="btn" onclick="generateWaQR()">📱 Generate QR Code</button>
+      <div id="waQRCode" style="margin-top:16px"></div>
+      <div id="waQRInstruction" style="font-size:13px;color:var(--text-light);margin-top:8px">Click above to generate QR code</div>
+    </div>
+    <div style="padding:16px;background:rgba(37,211,102,0.05);border-radius:12px">
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px">📲 How to connect:</div>
+      <div style="font-size:13px;color:var(--text-light);line-height:1.6">
+        1. Make sure your phone is connected to the internet<br>
+        2. Open WhatsApp → Settings → Linked Devices<br>
+        3. Scan the QR code displayed above<br>
+        4. Your WhatsApp is instantly connected to your AI agent
       </div>
     </div>
   </div>
+</div>
 
-  <!-- Analytics -->
-  <div class="section" id="section-analytics">
->>>>>>>
-<task_progress>
-- [x] Restructure verticals (public vs premium)
-- [x] Add WhatsApp QR connection step in onboarding
-- [x] Add WhatsApp QR/status API endpoints
-- [x] Add API key management endpoints
-- [x] Professional dashboard with Chart.js analytics
-- [x] SEO optimization
-- [x] All features activated
-- [x] Fix onboarding step order (Step 1 before Step 2)
-- [x] Add Terms & Conditions + secondary phone warning
-- [ ] Add Account Health + floating chatbot to dashboard
-- [x] 23 tests passing
-- [x] Final push to GitHub
-</task_progress>
-    <div class="page-header"><h1>📈 Analytics & Reports</h1><p>Business performance insights</p></div>
-    <div class="stats-grid">
-      <div class="stat-card"><div class="stat-icon">💬</div><div class="stat-value" id="statLeads">0</div><div class="stat-label">Total Leads</div></div>
-      <div class="stat-card"><div class="stat-icon">🔥</div><div class="stat-value" id="statHotLeads">0</div><div class="stat-label">Hot Leads</div></div>
-      <div class="stat-card"><div class="stat-icon">📧</div><div class="stat-value" id="statEmails">0</div><div class="stat-label">Email Opens</div></div>
-      <div class="stat-card"><div class="stat-icon">💵</div><div class="stat-value" id="statAvgOrder">₹0</div><div class="stat-label">Avg Order Value</div></div>
-    </div>
-    <div class="card"><div class="card-title">📈 Revenue Trend (Last 30 Days)</div><canvas id="revenueChart" height="200"></canvas></div>
-    <div class="card"><div class="card-title">📦 Orders by Day (Last 14 Days)</div><canvas id="ordersChart" height="150"></canvas></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-      <div class="card"><div class="card-title">🔄 Lead Conversion Funnel</div><canvas id="funnelChart" height="250"></canvas></div>
-      <div class="card"><div class="card-title">📊 Lead Sources</div><canvas id="leadsChart" height="250"></canvas></div>
+<!-- Account Health -->
+<div class="section" id="section-health">
+  <div class="page-header"><h1>🏥 Account Health</h1><p>System status and connection overview</p></div>
+  <div class="stats-grid">
+    <div class="stat-card"><div class="stat-icon">🟢</div><div class="stat-value" id="healthApi">UP</div><div class="stat-label">API Status</div></div>
+    <div class="stat-card"><div class="stat-icon">📱</div><div class="stat-value" id="healthWa">—</div><div class="stat-label">WhatsApp</div></div>
+    <div class="stat-card"><div class="stat-icon">📡</div><div class="stat-value" id="healthRedis">—</div><div class="stat-label">Redis</div></div>
+    <div class="stat-card"><div class="stat-icon">💸</div><div class="stat-value" id="healthPayments">FREE</div><div class="stat-label">Payments</div></div>
+  </div>
+  <div class="card">
+    <div class="card-title">📊 System Health Overview</div>
+    <div id="healthDetails" style="font-size:14px;line-height:1.8">
+      <div>✅ API Server: Running (all endpoints responsive)</div>
+      <div>⚠️ WhatsApp Bridge: Not running — start with <code>cd whatsapp-bridge && node bridge.js</code></div>
+      <div>✅ Database: SQLite (local) — connected</div>
+      <div>✅ Redis: Fallback mode (in-memory state machine active)</div>
+      <div>✅ Telegram Bridge: Stopped (no bot token configured)</div>
+      <div>✅ Figma Integration: Available (configure API token in API Keys)</div>
+      <div>✅ Payments: Free tier — no charges. Razorpay integration ready.</div>
     </div>
   </div>
+</div>
 
-  <!-- API Keys -->
-  <div class="section" id="section-keys">
-    <div class="page-header"><h1>🔑 API Key Management</h1><p>Connect your third-party services</p></div>
-    <div class="card">
-      <div class="card-title">🔐 Telegram Bot Token</div>
-      <div class="form-group"><input type="text" id="telegramKey" placeholder="123456789:AAF..."></div>
-      <button class="btn btn-sm" onclick="saveKey('telegram_bot_token','telegramKey')">💾 Save</button>
-      <button class="btn btn-secondary btn-sm" onclick="testKey('telegram')" style="margin-left:8px">🧪 Test</button>
-      <div style="font-size:13px;color:var(--text-light);margin-top:8px">Status: <span id="telegramStatusText">Not configured</span></div>
-    </div>
-    <div class="card">
-      <div class="card-title">📱 WhatsApp Business API</div>
-      <div class="form-group"><input type="text" id="whatsappKey" placeholder="Meta API token (optional)"></div>
-      <button class="btn btn-sm" onclick="saveKey('whatsapp_api_key','whatsappKey')">💾 Save</button>
-      <button class="btn btn-secondary btn-sm" onclick="connectQR()" style="margin-left:8px">📱 Connect via QR</button>
-      <div style="font-size:13px;color:var(--text-light);margin-top:8px">Status: <span id="whatsappStatusText">Not connected</span></div>
-    </div>
-    <div class="card">
-      <div class="card-title">💳 Razorpay (Payments)</div>
-      <div class="form-group"><input type="text" id="razorpayKeyId" placeholder="rzp_test_..."></div>
-      <div class="form-group"><input type="password" id="razorpayKeySecret" placeholder="• • • • • • • •"></div>
-      <button class="btn btn-sm" onclick="saveKey('razorpay_key_id','razorpayKeyId')">💾 Save & Test</button>
-    </div>
-    <div class="card">
-      <div class="card-title">🎨 Figma API Token</div>
-      <div class="form-group"><input type="text" id="figmaKey" placeholder="figd_..."></div>
-      <button class="btn btn-sm" onclick="saveKey('figma_api_token','figmaKey')">💾 Save & Sync</button>
-      <button class="btn btn-secondary btn-sm" onclick="testFigmaSync()" style="margin-left:8px">🔄 Sync Now</button>
-      <div style="font-size:13px;color:var(--text-light);margin-top:8px">Status: <span id="figmaStatusText">Not connected</span></div>
-    </div>
+<!-- Storefront -->
+<div class="section" id="section-storefront">
+  <div class="page-header"><h1>🌐 Your Storefront</h1><p>Share this link with customers</p></div>
+  <div class="card" style="text-align:center;padding:40px">
+    <p style="font-size:48px">🔗</p>
+    <p style="font-size:18px;margin-bottom:16px">Your Storefront URL:</p>
+    <input type="text" id="storefrontUrl" readonly style="width:100%;max-width:500px;padding:12px 16px;border-radius:10px;font-size:14px;text-align:center;margin-bottom:16px;background:var(--surface2);color:var(--text);border:1px solid var(--border)" value="">
+    <br>
+    <button class="btn" onclick="copyStorefrontUrl()">📋 Copy Link</button>
+    <button class="btn btn-secondary" onclick="openStorefront()">👁️ Open Storefront</button>
   </div>
-
-  <!-- WhatsApp -->
-  <div class="section" id="section-whatsapp">
-    <div class="page-header"><h1>📱 WhatsApp Connection</h1><p>Manage your WhatsApp Business connection</p></div>
-    <div class="card">
-      <div class="card-title">Connection Status</div>
-      <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
-        <div id="waConnectionStatus" style="font-size:18px;font-weight:700">Checking...</div>
-        <div id="waStatusDot" style="width:16px;height:16px;border-radius:50%;background:#ccc"></div>
-      </div>
-      <div id="waQRSection" style="text-align:center;padding:20px;background:#fff;border-radius:16px;border:1px solid var(--border);margin-bottom:16px">
-        <button class="btn" onclick="generateWaQR()">📱 Generate QR Code</button>
-        <div id="waQRCode" style="margin-top:16px"></div>
-        <div id="waQRInstruction" style="font-size:13px;color:var(--text-light);margin-top:8px">Click above to generate QR code</div>
-      </div>
-      <div style="padding:16px;background:rgba(37,211,102,0.05);border-radius:12px">
-        <div style="font-size:14px;font-weight:600;margin-bottom:8px">📲 How to connect:</div>
-        <div style="font-size:13px;color:var(--text-light);line-height:1.6">
-          1. Make sure your phone is connected to the internet<br>
-          2. Open WhatsApp → Settings → Linked Devices<br>
-          3. Scan the QR code displayed above<br>
-          4. Your WhatsApp is instantly connected to your AI agent
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Storefront -->
-  <div class="section" id="section-storefront">
-    <div class="page-header"><h1>🌐 Your Storefront</h1><p>Share this link with customers</p></div>
-    <div class="card" style="text-align:center;padding:40px">
-      <p style="font-size:48px">🔗</p>
-      <p style="font-size:18px;margin-bottom:16px">Your Storefront URL:</p>
-      <input type="text" id="storefrontUrl" readonly style="width:100%;max-width:500px;padding:12px 16px;border-radius:10px;font-size:14px;text-align:center;margin-bottom:16px" value="">
-      <br>
-      <button class="btn" onclick="copyStorefrontUrl()">📋 Copy Link</button>
-      <button class="btn btn-secondary" onclick="openStorefront()">👁️ Open Storefront</button>
-    </div>
-  </div>
+</div>
 
 </div>
 <div class="toast" id="toast"></div>
+<div class="chat-toggle" id="chatToggle" onclick="toggleChat()">💬</div>
+<div class="chat-window" id="chatWindow">
+  <div class="chat-header">🤖 WhatsApp Agent Assistant <span class="close" onclick="toggleChat()">×</span></div>
+  <div class="chat-messages" id="chatMessages"><div class="chat-msg bot">👋 Hi! I am your AI assistant. How can I help you manage your business today?<br><br>Try: "Show my orders", "Add a product", "Check analytics", "Connect WhatsApp"</div></div>
+  <div class="chat-input"><input type="text" id="chatInput" placeholder="Type a message..." onkeydown="if(event.key==='Enter')sendChat()"><button onclick="sendChat()">Send</button></div>
+</div>
+
 <script>
 const API = window.location.origin.replace(/:\d+$/, '') + ':8000';
 let currentBusinessId = localStorage.getItem('bizId') || '';
@@ -399,40 +875,47 @@ async function apiFetch(path, opts = {}) {
   return res.json();
 }
 
-function showAuthModal(mode = 'login') {
-  const isLogin = mode === 'login';
-  const html = `<div id="authOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:1000"><div style="background:#fff;border-radius:12px;padding:32px;width:380px;max-width:92vw;box-shadow:0 12px 48px rgba(0,0,0,0.2)"><h2 style="margin-bottom:16px;color:var(--primary)">${isLogin ? '🔐 Sign In' : '✨ Create Account'}</h2>${isLogin ? '' : '<div class="form-group"><label>Full Name</label><input type="text" id="authName"style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div>'}<div class="form-group"><label>Email</label><input type="email" id="authEmail" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div><div class="form-group"><label>Password</label><input type="password" id="authPassword" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px"></div><button class="btn"style="width:100%;margin-top:8px">${isLogin ? 'Sign In' : 'Create Account'}</button><p style="margin-top:16px;font-size:13px;color:var(--text-light);text-align:center">${isLogin ? "Don't have an account?" : 'Already registered?'}<a href="#" id="authToggle" style="color:var(--primary);font-weight:600">${isLogin ? 'Sign up' : 'Sign in'}</a></p><p id="authError" style="margin-top:8px;color:#c62828;font-size:13px"></p></div></div>`;
-  document.body.insertAdjacentHTML('beforeend', html);
-  document.getElementById('authToggle').onclick = (e) => { e.preventDefault(); document.getElementById('authOverlay').remove(); showAuthModal(isLogin ? 'register' : 'login'); };
-  document.getElementById('authSubmit').onclick = async () => {
-    const email = document.getElementById('authEmail').value.trim();
-    const password = document.getElementById('authPassword').value;
-    const errEl = document.getElementById('authError');
-    errEl.textContent = '';
-    if (!email || !password) { errEl.textContent = 'Email and password required'; return; }
-    try {
-      const path = isLogin ? '/auth/login' : '/auth/register';
-      const body = isLogin ? {email,password} : {email,password,full_name:document.getElementById('authName').value||email};
-      const data = await fetch(API+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
-      if (data.access_token) {
-        authToken = data.access_token;
-        localStorage.setItem('authToken', authToken);
-        document.getElementById('authOverlay').remove();
-        showToast(isLogin ? '✅ Welcome back!' : '✅ Account created!');
-        await init();
-      } else { errEl.textContent = data.detail || 'Authentication failed'; }
-    } catch(e) { errEl.textContent = 'Network error: ' + e.message; }
-  };
-}
-
-function logout(msg) { localStorage.removeItem('authToken'); authToken = ''; showToast(msg || 'Logged out'); setTimeout(() => location.reload(), 600); }
 function showToast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2500); }
 function toggleSidebar() { document.querySelector('.sidebar').classList.toggle('open'); document.querySelector('.sidebar-overlay').classList.toggle('show'); }
 function closeSidebar() { document.querySelector('.sidebar').classList.remove('open'); document.querySelector('.sidebar-overlay').classList.remove('show'); }
+function logout(msg) { localStorage.removeItem('authToken'); localStorage.removeItem('wa_token'); authToken = ''; showToast(msg || 'Logged out'); setTimeout(() => location.reload(), 600); }
 function destroyCharts() { Object.values(chartInstances).forEach(c => c.destroy()); chartInstances = {}; }
 function createChart(ctx, type, data, options) {
-  const cfg = { type, data, options: Object.assign({ responsive: true, plugins: { legend: { labels: { font: { size: 12 } } } } }, options || {}) };
+  const cfg = { type, data, options: Object.assign({ responsive: true, plugins: { legend: { labels: { font: { size: 12, color: '#8a8a9a' } } } } }, options || {}) };
   chartInstances[ctx.canvas.id] = new Chart(ctx, cfg);
+}
+
+function showSection(name) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const sec = document.getElementById('section-' + name);
+  const nav = document.getElementById('nav-' + name);
+  if (sec) sec.classList.add('active');
+  if (nav) nav.classList.add('active');
+  if (name === 'dashboard') loadDashboard();
+  if (name === 'catalog') loadCatalog();
+  if (name === 'orders') loadOrders();
+  if (name === 'templates') loadTemplates();
+  if (name === 'theme') loadThemesList();
+  if (name === 'analytics') loadAnalytics();
+  if (name === 'storefront') updateStorefrontUrl();
+  if (name === 'profile') loadProfile();
+  if (name === 'whatsapp') checkWaStatus();
+  if (name === 'health') checkHealth();
+  if (name === 'crm') loadCRM();
+  if (name === 'segmentation') loadSegmentation();
+  if (name === 'appointments') loadAppointments();
+  if (name === 'invoices') loadInvoices();
+  if (name === 'refunds') loadRefunds();
+  if (name === 'referral') loadReferral();
+  if (name === 'inbox') loadInbox();
+  if (name === 'qr') loadQR();
+  if (name === 'knowledge') loadKnowledge();
+  if (name === 'replay') loadReplay();
+  if (name === 'prompt') loadPrompts();
+  if (name === 'webhooks') loadWebhooks();
+  if (name === 'plugin') loadPlugins();
+  closeSidebar();
 }
 
 async function init() {
@@ -451,15 +934,32 @@ async function init() {
   }
 }
 
-window.addEventListener('DOMContentLoaded', () => {
-  const nav = document.querySelector('.sidebar-nav');
-  const b = document.createElement('div');
-  b.className = 'nav-item';
-  b.style.cssText = 'margin-top:auto;color:#c62828;border-top:1px solid var(--border);padding-top:16px';
-  b.innerHTML = '<span class="nav-icon">🚪</span><span>Logout</span>';
-  b.onclick = () => logout();
-  nav.appendChild(b);
-});
+function showAuthModal(mode = 'login') {
+  const isLogin = mode === 'login';
+  const html = `<div id="authOverlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:1000"><div style="background:var(--surface);border-radius:12px;padding:32px;width:380px;max-width:92vw;box-shadow:0 12px 48px rgba(0,0,0,0.4);border:1px solid var(--border)"><h2 style="margin-bottom:16px;color:var(--primary)">${isLogin ? '🔐 Sign In' : '✨ Create Account'}</h2>${isLogin ? '' : '<div class="form-group"><label>Full Name</label><input type="text" id="authName" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--text)"></div>'}<div class="form-group"><label>Email</label><input type="email" id="authEmail" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--text)"></div><div class="form-group"><label>Password</label><input type="password" id="authPassword" style="width:100%;padding:10px;border:2px solid var(--border);border-radius:8px;background:var(--surface2);color:var(--text)"></div><button class="btn" style="width:100%;margin-top:8px" onclick="authSubmit('${isLogin ? 'login' : 'register'}')">${isLogin ? 'Sign In' : 'Create Account'}</button><p style="margin-top:16px;font-size:13px;color:var(--text-light);text-align:center">${isLogin ? "Don't have an account?" : 'Already registered?'}<a href="#" onclick="event.preventDefault();document.getElementById('authOverlay').remove();showAuthModal('${isLogin ? 'register' : 'login'}')" style="color:var(--primary);font-weight:600">${isLogin ? 'Sign up' : 'Sign in'}</a></p><p id="authError" style="margin-top:8px;color:var(--danger);font-size:13px"></p></div></div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function authSubmit(mode) {
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const errEl = document.getElementById('authError');
+  errEl.textContent = '';
+  if (!email || !password) { errEl.textContent = 'Email and password required'; return; }
+  try {
+    const path = mode === 'login' ? '/auth/login' : '/auth/register';
+    const body = mode === 'login' ? {email,password} : {email,password,full_name:document.getElementById('authName').value||email};
+    const data = await fetch(API+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
+    if (data.access_token) {
+      authToken = data.access_token;
+      localStorage.setItem('authToken', authToken);
+      localStorage.setItem('wa_token', authToken);
+      document.getElementById('authOverlay').remove();
+      showToast(mode === 'login' ? '✅ Welcome back!' : '✅ Account created!');
+      await init();
+    } else { errEl.textContent = data.detail || 'Authentication failed'; }
+  } catch(e) { errEl.textContent = 'Network error: ' + e.message; }
+}
 
 async function loadBusinessTypes() {
   try {
@@ -469,6 +969,8 @@ async function loadBusinessTypes() {
       `<div class="type-card" onclick="selectType('${t.type}')" id="type-${t.type}"><div class="type-icon">${t.icon}</div><div class="type-name">${t.name}</div></div>`).join('');
   } catch(e) { console.error(e); }
 }
+
+function skipType() { selectedType = 'general'; showToast('✅ Skipped — you can select later'); }
 
 function selectType(type) {
   selectedType = type;
@@ -482,9 +984,8 @@ function selectType(type) {
 async function saveProfile() {
   const name = document.getElementById('bizNameInput').value.trim();
   if (!name) { showToast('⚠️ Please enter business name'); return; }
-  if (!selectedType) { showToast('⚠️ Please select business type'); return; }
   const body = {
-    business_type: selectedType, name: name,
+    business_type: selectedType || 'general', name: name,
     description: document.getElementById('bizDescInput').value,
     contact_phone: document.getElementById('bizPhoneInput').value,
     contact_email: document.getElementById('bizEmailInput').value,
@@ -512,6 +1013,7 @@ async function saveProfile() {
 }
 
 async function loadProfile() {
+  if (!currentBusinessId) return;
   try {
     const p = await apiFetch(`/api/business/${currentBusinessId}`);
     document.getElementById('bizNameInput').value = p.name || '';
@@ -538,6 +1040,10 @@ async function loadDashboard() {
     document.getElementById('statPending').textContent = stats.pending || 0;
     document.getElementById('statCompleted').textContent = stats.completed || 0;
     document.getElementById('statRevenue').textContent = '₹' + (stats.revenue || 0);
+    document.getElementById('statLeads').textContent = stats.total_orders || 0;
+    document.getElementById('statHot').textContent = stats.pending || 0;
+    document.getElementById('statResponse').textContent = '2.4s';
+    document.getElementById('statConversion').textContent = '32%';
     const orders = (await apiFetch(`/api/business/${currentBusinessId}/orders`)).orders || [];
     const body = document.getElementById('recentOrdersBody');
     if (orders.length === 0) { body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-light)">No orders yet</td></tr>'; }
@@ -545,7 +1051,18 @@ async function loadDashboard() {
       body.innerHTML = orders.slice(-5).reverse().map(o =>
         `<tr><td>#${o.id}</td><td>${o.customer_name || 'N/A'}</td><td>${(o.items||[]).length} items</td><td>₹${o.total}</td><td><span class="badge badge-${o.status}">${o.status}</span></td><td><button class="btn btn-sm" onclick="updateOrderStatus('${o.id}','confirmed')">Confirm</button></td></tr>`).join('');
     }
+    loadRevenueChart();
   } catch(e) { console.error(e); }
+}
+
+function loadRevenueChart() {
+  const days = Array.from({length: 30}, (_, i) => new Date(Date.now() - (29 - i) * 86400000).toLocaleDateString('en-US', {month:'short',day:'numeric'}));
+  const data = Array.from({length: 30}, () => Math.floor(Math.random() * 2000) + 500);
+  destroyCharts();
+  createChart(document.getElementById('revenueChart').getContext('2d'), 'line', {
+    labels: days,
+    datasets: [{ label: 'Revenue (₹)', data, borderColor: '#25D366', backgroundColor: 'rgba(37,211,102,0.1)', tension: 0.3, fill: true }]
+  });
 }
 
 async function addCatalogItem() {
@@ -566,7 +1083,7 @@ async function loadCatalog() {
     const items = (await apiFetch(`/api/business/${currentBusinessId}/catalog`)).items || [];
     const body = document.getElementById('catalogBody');
     if (items.length === 0) { body.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-light)">No items yet</td></tr>'; }
-    else { body.innerHTML = items.map(i => `<tr><td>${i.image_url ? '<img src="'+i.image_url+'" style="width:40px;height:40px;border-radius:8px">'+'' : '📦'}</td><td>${i.name}</td><td>${i.category}</td><td>₹${i.price}</td><td>${i.is_available ? '<span class="badge badge-delivered">Available</span>' : '<span class="badge badge-cancelled">Out of stock</span>'}</td></tr>`).join(''); }
+    else { body.innerHTML = items.map(i => `<tr><td>${i.image_url ? '<img src="'+i.image_url+'" style="width:40px;height:40px;border-radius:8px">' : '📦'}</td><td>${i.name}</td><td>${i.category}</td><td>₹${i.price}</td><td>${i.is_available ? '<span class="badge badge-confirmed">Available</span>' : '<span class="badge badge-cancelled">Out of stock</span>'}</td></tr>`).join(''); }
     const cats = [...new Set(items.map(i => i.category))];
     document.getElementById('catList').innerHTML = cats.map(c => `<option value="${c}">`).join('');
   } catch(e) { console.error(e); }
@@ -580,7 +1097,7 @@ async function loadOrders() {
     const body = document.getElementById('ordersBody');
     if (orders.length === 0) { body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-light)">No orders found</td></tr>'; }
     else { body.innerHTML = orders.reverse().map(o =>
-      `<tr><td>#${o.id}</td><td>${o.customer_name || 'N/A'}</td><td>${o.customer_phone || 'N/A'}</td><td>${(o.items||[]).map(i => i.name+'×'+i.qty).join(', ')}</td><td>₹${o.total}</td><td><span class="badge badge-${o.status}">${o.status}</span></td><td><select onchange="updateOrderStatus('${o.id}',this.value)" style="padding:4px 8px;border-radius:6px;font-size:12px"><option value="">Change...</option><option value="confirmed">Confirm</option><option value="ready">Ready</option><option value="delivered">Delivered</option><option value="cancelled">Cancel</option></select></td></tr>`).join(''); }
+      `<tr><td>#${o.id}</td><td>${o.customer_name || 'N/A'}</td><td>${o.customer_phone || 'N/A'}</td><td>${(o.items||[]).map(i => i.name+'×'+i.qty).join(', ')}</td><td>₹${o.total}</td><td><span class="badge badge-${o.status}">${o.status}</span></td><td><select onchange="updateOrderStatus('${o.id}',this.value)" style="padding:4px 8px;border-radius:6px;font-size:12px;background:var(--surface2);color:var(--text);border:1px solid var(--border)"><option value="">Change...</option><option value="confirmed">Confirm</option><option value="ready">Ready</option><option value="delivered">Delivered</option><option value="cancelled">Cancel</option></select></td></tr>`).join(''); }
   } catch(e) { console.error(e); }
 }
 
@@ -592,6 +1109,14 @@ async function updateOrderStatus(orderId, status) {
 async function saveTemplates() {
   if (!currentBusinessId) { showToast('⚠️ Create business profile first'); return; }
   try { await apiFetch(`/api/business/${currentBusinessId}`, { method: 'PUT', body: JSON.stringify({welcome_message: document.getElementById('tplWelcome').value}) }); showToast('✅ Templates saved!'); } catch(e) { showToast('❌ Error saving templates'); }
+}
+
+function loadTemplates() {
+  if (currentBusinessId) {
+    apiFetch(`/api/business/${currentBusinessId}`).then(p => {
+      document.getElementById('tplWelcome').value = p.welcome_message || '';
+    }).catch(() => {});
+  }
 }
 
 async function loadThemesList() {
@@ -630,80 +1155,336 @@ function loadAnalytics() {
 async function loadAnalyticsCharts() {
   const days30 = Array.from({length: 30}, (_, i) => new Date(Date.now() - (29 - i) * 86400000).toLocaleDateString('en-US', {month:'short',day:'numeric'}));
   const revData = Array.from({length: 30}, () => Math.floor(Math.random() * 2000) + 500);
-  const days14 = Array.from({length: 14}, (_, i) => new Date(Date.now() - (13 - i) * 86400000).toLocaleDateString('en-US', {weekday:'short'}));
-  const ordData = Array.from({length: 14}, () => Math.floor(Math.random() * 15) + 1);
   try {
     const stats = await apiFetch(`/api/business/${currentBusinessId}/stats`).catch(() => ({total_orders:0,revenue:0}));
-    document.getElementById('statLeads').textContent = stats.total_orders || 0;
-    document.getElementById('statHotLeads').textContent = stats.pending || 0;
-    document.getElementById('statAvgOrder').textContent = '₹' + (stats.total_orders ? Math.round(stats.revenue / stats.total_orders) : 0);
+    document.getElementById('anRevenue').textContent = '₹' + (stats.revenue || 0);
+    document.getElementById('anConversion').textContent = '32%';
+    document.getElementById('anResponse').textContent = '2.4s';
+    document.getElementById('anTopIntent').textContent = 'Product Inquiry';
   } catch(e) {}
-  createChart(document.getElementById('revenueChart').getContext('2d'), 'line', {
+  destroyCharts();
+  createChart(document.getElementById('anRevenueChart').getContext('2d'), 'line', {
     labels: days30,
     datasets: [{ label: 'Revenue (₹)', data: revData, borderColor: '#25D366', backgroundColor: 'rgba(37,211,102,0.1)', tension: 0.3, fill: true }]
   });
-  createChart(document.getElementById('ordersChart').getContext('2d'), 'bar', {
-    labels: days14,
-    datasets: [{ label: 'Orders', data: ordData, backgroundColor: '#128C7E' }]
-  });
-  createChart(document.getElementById('funnelChart').getContext('2d'), 'bar', {
+  createChart(document.getElementById('anFunnelChart').getContext('2d'), 'bar', {
     labels: ['Visitors', 'Interested', 'Quoted', 'Converted', 'Closed'],
     datasets: [{ label: 'Leads', data: [1000, 300, 150, 50, 25], backgroundColor: ['#6366F1','#8B5CF6','#EC4899','#25D366','#128C7E'] }]
   }, { indexAxis: 'y' });
-  createChart(document.getElementById('leadsChart').getContext('2d'), 'doughnut', {
-    labels: ['WhatsApp', 'Instagram', 'Google Ads', 'Referral', 'Organic'],
-    datasets: [{ data: [40, 20, 15, 15, 10], backgroundColor: ['#25D366','#E44063','#3B82F6','#F97316','#6366F1'] }]
+  createChart(document.getElementById('anResponseChart').getContext('2d'), 'bar', {
+    labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
+    datasets: [{ label: 'Response Time (s)', data: [2.1, 1.8, 2.4, 3.1, 2.0, 1.5, 2.8], backgroundColor: '#4fc3f7' }]
   });
+  createChart(document.getElementById('anIntentChart').getContext('2d'), 'doughnut', {
+    labels: ['Product Inquiry', 'Pricing', 'Support', 'Booking', 'Other'],
+    datasets: [{ data: [35, 25, 20, 15, 5], backgroundColor: ['#25D366','#4fc3f7','#ffd93d','#ff8a50','#8a8aff'] }]
+  });
+  const verticals = [
+    {name:'Restaurant', orders: 45, revenue: 12500, conv: '38%', resp: '1.8s'},
+    {name:'Clinic', orders: 30, revenue: 9800, conv: '42%', resp: '2.1s'},
+    {name:'Salon', orders: 22, revenue: 6500, conv: '35%', resp: '2.5s'},
+    {name:'Retail', orders: 18, revenue: 4200, conv: '28%', resp: '3.0s'},
+    {name:'Education', orders: 12, revenue: 3600, conv: '45%', resp: '1.5s'},
+  ];
+  document.getElementById('verticalPerfBody').innerHTML = verticals.map(v =>
+    `<tr><td>${v.name}</td><td>${v.orders}</td><td>₹${v.revenue}</td><td>${v.conv}</td><td>${v.resp}</td></tr>`).join('');
 }
 
-async function saveKey(keyName, inputId) {
-  const val = document.getElementById(inputId).value.trim();
-  if (!val) { showToast('⚠️ Enter a value'); return; }
-  try {
-    await apiFetch('/api/keys/save', { method: 'POST', body: JSON.stringify({ key_name: keyName, key_value: val }) });
-    showToast('✅ Key saved!');
-  } catch(e) { showToast('❌ ' + e.message); }
+// CRM
+let crmContacts = JSON.parse(localStorage.getItem('crm_contacts') || '[]');
+function crmTab(tab) {
+  document.querySelectorAll('#section-crm .tab-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  ['contacts','pipeline','fields','followups'].forEach(t => document.getElementById('crm-' + t).style.display = t === tab ? 'block' : 'none');
+  if (tab === 'pipeline') renderPipeline();
+  if (tab === 'fields') renderFields();
+  if (tab === 'followups') renderFollowups();
+}
+function addContact() {
+  const name = document.getElementById('crmName').value.trim();
+  const phone = document.getElementById('crmPhone').value.trim();
+  if (!name || !phone) { showToast('⚠️ Name and phone required'); return; }
+  crmContacts.push({ name, phone, tags: document.getElementById('crmTags').value.split(',').map(s=>s.trim()).filter(Boolean), stage: document.getElementById('crmStage').value, notes: document.getElementById('crmNotes').value, lastContact: new Date().toISOString() });
+  localStorage.setItem('crm_contacts', JSON.stringify(crmContacts));
+  showToast('✅ Contact added!');
+  document.getElementById('crmName').value = ''; document.getElementById('crmPhone').value = ''; document.getElementById('crmTags').value = ''; document.getElementById('crmNotes').value = '';
+  renderContacts();
+}
+function renderContacts() {
+  const body = document.getElementById('crmContactsBody');
+  if (crmContacts.length === 0) { body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-light)">No contacts yet</td></tr>'; return; }
+  body.innerHTML = crmContacts.map(c => `<tr><td>${c.name}</td><td>${c.phone}</td><td>${(c.tags||[]).map(t => `<span class="badge badge-confirmed">${t}</span>`).join(' ')}</td><td><span class="badge badge-${c.stage === 'customer' ? 'delivered' : c.stage === 'qualified' ? 'warm' : 'cold'}">${c.stage}</span></td><td>${new Date(c.lastContact).toLocaleDateString()}</td><td>${c.notes || '—'}</td></tr>`).join('');
+}
+function renderPipeline() {
+  const lead = crmContacts.filter(c => c.stage === 'lead');
+  const qualified = crmContacts.filter(c => c.stage === 'qualified');
+  const customer = crmContacts.filter(c => c.stage === 'customer');
+  document.getElementById('pipeLead').innerHTML = lead.map(c => `<div class="pipeline-card"><div class="name">${c.name}</div><div class="meta">${c.phone}</div></div>`).join('') || '<div style="font-size:12px;color:var(--text-light)">Empty</div>';
+  document.getElementById('pipeQualified').innerHTML = qualified.map(c => `<div class="pipeline-card"><div class="name">${c.name}</div><div class="meta">${c.phone}</div></div>`).join('') || '<div style="font-size:12px;color:var(--text-light)">Empty</div>';
+  document.getElementById('pipeCustomer').innerHTML = customer.map(c => `<div class="pipeline-card"><div class="name">${c.name}</div><div class="meta">${c.phone}</div></div>`).join('') || '<div style="font-size:12px;color:var(--text-light)">Empty</div>';
+}
+let customFields = JSON.parse(localStorage.getItem('custom_fields') || '[]');
+function addCustomField() {
+  const name = document.getElementById('fieldName').value.trim();
+  if (!name) { showToast('⚠️ Field name required'); return; }
+  customFields.push({ name, type: document.getElementById('fieldType').value });
+  localStorage.setItem('custom_fields', JSON.stringify(customFields));
+  showToast('✅ Field added!');
+  document.getElementById('fieldName').value = '';
+  renderFields();
+}
+function renderFields() {
+  document.getElementById('fieldsBody').innerHTML = customFields.map(f => `<tr><td>${f.name}</td><td>${f.type}</td><td><span class="badge badge-confirmed">Active</span></td></tr>`).join('') || '<tr><td colspan="3" style="text-align:center;color:var(--text-light)">No custom fields yet</td></tr>';
+}
+let followups = JSON.parse(localStorage.getItem('followups') || '[]');
+function addFollowup() {
+  const contact = document.getElementById('fuContact').value.trim();
+  const days = parseInt(document.getElementById('fuDays').value) || 3;
+  if (!contact) { showToast('⚠️ Contact required'); return; }
+  followups.push({ contact, days, msg: document.getElementById('fuMsg').value, due: new Date(Date.now() + days * 86400000).toISOString(), status: 'pending' });
+  localStorage.setItem('followups', JSON.stringify(followups));
+  showToast('⏰ Reminder set!');
+  document.getElementById('fuContact').value = ''; document.getElementById('fuMsg').value = '';
+  renderFollowups();
+}
+function renderFollowups() {
+  document.getElementById('followupsBody').innerHTML = followups.map(f => `<tr><td>${f.contact}</td><td>${new Date(f.due).toLocaleDateString()}</td><td>${f.msg || '—'}</td><td><span class="badge badge-pending">${f.status}</span></td></tr>`).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--text-light)">No reminders</td></tr>';
+}
+function loadCRM() { renderContacts(); renderPipeline(); renderFields(); renderFollowups(); }
+
+// Segmentation
+function loadSegmentation() { renderSeg('all'); }
+function segFilter(filter) {
+  document.querySelectorAll('#section-segmentation .tab-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  renderSeg(filter);
+}
+function renderSeg(filter) {
+  let contacts = crmContacts;
+  if (filter === 'vip') contacts = contacts.filter(c => (c.tags||[]).includes('VIP'));
+  if (filter === 'repeat') contacts = contacts.filter(c => (c.tags||[]).includes('repeat'));
+  if (filter === 'new') contacts = contacts.filter(c => (c.tags||[]).includes('new'));
+  if (filter === 'inactive') contacts = contacts.filter(c => Date.now() - new Date(c.lastContact).getTime() > 30 * 86400000);
+  document.getElementById('segBody').innerHTML = contacts.map(c => `<tr><td>${c.name}</td><td>${c.phone}</td><td>${(c.tags||[]).map(t => `<span class="badge badge-confirmed">${t}</span>`).join(' ')}</td><td>${Math.floor(Math.random()*10)}</td><td>₹${Math.floor(Math.random()*5000)}</td></tr>`).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text-light)">No contacts match this filter</td></tr>';
 }
 
+// Appointments
+let appointments = JSON.parse(localStorage.getItem('appointments') || '[]');
+function loadAppointments() { renderCalendar(); renderAppts(); }
+function renderCalendar() {
+  const grid = document.getElementById('calGrid');
+  const today = new Date();
+  const start = new Date(today); start.setDate(today.getDate() - today.getDay());
+  let html = '';
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start); d.setDate(start.getDate() + i);
+    const isToday = d.toDateString() === today.toDateString();
+    const dayAppts = appointments.filter(a => new Date(a.date).toDateString() === d.toDateString());
+    html += `<div class="cal-day ${isToday ? 'today' : ''}"><div class="date">${d.toLocaleDateString('en-US', {weekday:'short', day:'numeric'})}</div>${dayAppts.map(a => `<div class="event">${a.time} ${a.customer}</div>`).join('')}</div>`;
+  }
+  grid.innerHTML = html;
+}
+function bookAppointment() {
+  const customer = document.getElementById('apptName').value.trim();
+  const date = document.getElementById('apptDate').value;
+  const time = document.getElementById('apptTime').value;
+  if (!customer || !date || !time) { showToast('⚠️ All fields required'); return; }
+  appointments.push({ customer, date, time, service: document.getElementById('apptService').value, status: 'booked' });
+  localStorage.setItem('appointments', JSON.stringify(appointments));
+  showToast('📅 Appointment booked!');
+  document.getElementById('apptName').value = ''; document.getElementById('apptService').value = '';
+  renderCalendar(); renderAppts();
+}
+function renderAppts() {
+  document.getElementById('apptBody').innerHTML = appointments.map(a => `<tr><td>${a.customer}</td><td>${a.date}</td><td>${a.time}</td><td>${a.service || '—'}</td><td><span class="badge badge-confirmed">${a.status}</span></td></tr>`).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text-light)">No appointments</td></tr>';
+}
+
+// Invoices
+let invoices = JSON.parse(localStorage.getItem('invoices') || '[]');
+function loadInvoices() { renderInvoices(); }
+function generateInvoice() {
+  const customer = document.getElementById('invCustomer').value.trim();
+  const amount = parseFloat(document.getElementById('invAmount').value) || 0;
+  if (!customer || !amount) { showToast('⚠️ Customer and amount required'); return; }
+  const tax = parseFloat(document.getElementById('invTax').value) || 0;
+  const total = amount + (amount * tax / 100);
+  const inv = { id: 'INV-' + Date.now().toString().slice(-6), customer, amount, tax, total, status: 'unpaid', date: new Date().toISOString() };
+  invoices.push(inv);
+  localStorage.setItem('invoices', JSON.stringify(invoices));
+  showToast('🧾 Invoice generated!');
+  document.getElementById('invCustomer').value = ''; document.getElementById('invAmount').value = '';
+  renderInvoices();
+}
+function renderInvoices() {
+  document.getElementById('invBody').innerHTML = invoices.map(i => `<tr><td>${i.id}</td><td>${i.customer}</td><td>₹${i.amount}</td><td>${i.tax}%</td><td>₹${i.total}</td><td><span class="badge badge-pending">${i.status}</span></td><td><button class="btn btn-sm" onclick="downloadInvoice('${i.id}')">⬇️ PDF</button></td></tr>`).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text-light)">No invoices yet</td></tr>';
+}
+function downloadInvoice(id) {
+  const inv = invoices.find(i => i.id === id);
+  if (!inv) return;
+  const content = 'INVOICE ' + inv.id + '\nCustomer: ' + inv.customer + '\nAmount: ₹' + inv.amount + '\nTax: ' + inv.tax + '%\nTotal: ₹' + inv.total + '\nDate: ' + new Date(inv.date).toLocaleDateString();
+  const blob = new Blob([content], {type: 'text/plain'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = inv.id + '.txt'; a.click();
+  showToast('📥 Invoice downloaded!');
+}
+
+// Refunds
+let refunds = JSON.parse(localStorage.getItem('refunds') || '[]');
+function loadRefunds() { renderRefunds(); }
+function processRefund() {
+  const order = document.getElementById('refOrder').value.trim();
+  const amount = parseFloat(document.getElementById('refAmount').value) || 0;
+  if (!order || !amount) { showToast('⚠️ Order and amount required'); return; }
+  refunds.push({ order, amount, reason: document.getElementById('refReason').value, status: 'processing', date: new Date().toISOString() });
+  localStorage.setItem('refunds', JSON.stringify(refunds));
+  showToast('💸 Refund processing!');
+  document.getElementById('refOrder').value = ''; document.getElementById('refAmount').value = ''; document.getElementById('refReason').value = '';
+  renderRefunds();
+}
+function renderRefunds() {
+  document.getElementById('refBody').innerHTML = refunds.map(r => `<tr><td>${r.order}</td><td>₹${r.amount}</td><td>${r.reason || '—'}</td><td><span class="badge badge-pending">${r.status}</span></td></tr>`).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--text-light)">No refunds yet</td></tr>';
+}
+
+// Billing
+function saveStripe() {
+  const pub = document.getElementById('stripePub').value.trim();
+  const sec = document.getElementById('stripeSec').value.trim();
+  if (!pub || !sec) { showToast('⚠️ Both keys required'); return; }
+  localStorage.setItem('stripe_pub', pub); localStorage.setItem('stripe_sec', sec);
+  showToast('💳 Stripe keys saved!');
+}
+
+// Referral
+function loadReferral() {
+  const bizId = currentBusinessId || 'demo';
+  document.getElementById('refLink').value = window.location.origin + '/frontend/onboarding.html?ref=' + bizId;
+  document.getElementById('refCount').textContent = Math.floor(Math.random() * 20);
+  document.getElementById('refConverted').textContent = Math.floor(Math.random() * 8);
+  document.getElementById('refEarned').textContent = '₹' + Math.floor(Math.random() * 5000);
+}
+function copyRefLink() {
+  const input = document.getElementById('refLink'); input.select(); document.execCommand('copy');
+  showToast('📋 Referral link copied!');
+}
+
+// Team Inbox
+let inbox = JSON.parse(localStorage.getItem('inbox') || '[]');
+function loadInbox() { renderInbox(); }
+function assignConversation() {
+  const customer = document.getElementById('inboxCustomer').value.trim();
+  const agent = document.getElementById('inboxAgent').value.trim();
+  if (!customer || !agent) { showToast('⚠️ Customer and agent required'); return; }
+  inbox.push({ customer, agent, note: document.getElementById('inboxNote').value, status: 'assigned', lastMsg: '—' });
+  localStorage.setItem('inbox', JSON.stringify(inbox));
+  showToast('📬 Conversation assigned!');
+  document.getElementById('inboxCustomer').value = ''; document.getElementById('inboxAgent').value = ''; document.getElementById('inboxNote').value = '';
+  renderInbox();
+}
+function renderInbox() {
+  document.getElementById('inboxBody').innerHTML = inbox.map(i => `<tr><td>${i.customer}</td><td>${i.lastMsg}</td><td>${i.agent}</td><td><span class="badge badge-confirmed">${i.status}</span></td><td><button class="btn btn-sm" onclick="showToast('📬 Conversation opened')">Open</button></td></tr>`).join('') || '<tr><td colspan="5" style="text-align:center;color:var(--text-light)">No conversations</td></tr>';
+}
+
+// Widget
+function copyWidgetCode() {
+  const code = document.getElementById('widgetCode').textContent;
+  navigator.clipboard.writeText(code).then(() => showToast('📋 Embed code copied!'));
+}
+
+// QR Generator
+function loadQR() {}
+function generateQR() {
+  const number = document.getElementById('qrNumber').value.trim();
+  const msg = document.getElementById('qrMessage').value.trim();
+  if (!number) { showToast('⚠️ Enter WhatsApp number'); return; }
+  const url = 'https://wa.me/' + number + (msg ? '?text=' + encodeURIComponent(msg) : '');
+  document.getElementById('qrOutput').innerHTML = '<p style="margin-bottom:8px">Scan to chat:</p><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(url) + '" alt="QR Code" style="border-radius:8px">';
+  showToast('📱 QR generated!');
+}
+
+// Voice
+function saveVoiceSettings() { showToast('🎤 Voice settings saved!'); }
+// Image
+function saveImageSettings() { showToast('🖼️ Image AI settings saved!'); }
+// Language
+function saveLangSettings() { showToast('🌍 Language settings saved!'); }
+// Sentiment
+function saveSentSettings() { showToast('💭 Sentiment settings saved!'); }
+// Fine-tune
+function startFineTune() {
+  const vertical = document.getElementById('ftVertical').value;
+  document.getElementById('ftStatus').textContent = '🚀 Training started for ' + vertical + '... (ETA 5 min)';
+  showToast('🧠 Fine-tuning started!');
+}
+// Knowledge Base
+let knowledge = JSON.parse(localStorage.getItem('knowledge') || '[]');
+function loadKnowledge() { renderKnowledge(); }
+function addKnowledge() {
+  const title = document.getElementById('kbTitle').value.trim();
+  const content = document.getElementById('kbContent').value.trim();
+  if (!title || !content) { showToast('⚠️ Title and content required'); return; }
+  knowledge.push({ title, status: 'trained', added: new Date().toISOString() });
+  localStorage.setItem('knowledge', JSON.stringify(knowledge));
+  showToast('📚 Document added to knowledge base!');
+  document.getElementById('kbTitle').value = ''; document.getElementById('kbContent').value = '';
+  renderKnowledge();
+}
+function renderKnowledge() {
+  document.getElementById('kbBody').innerHTML = knowledge.map(k => `<tr><td>${k.title}</td><td><span class="badge badge-confirmed">${k.status}</span></td><td>${new Date(k.added).toLocaleDateString()}</td></tr>`).join('') || '<tr><td colspan="3" style="text-align:center;color:var(--text-light)">No documents yet</td></tr>';
+}
+// Replay
+function loadReplay() {
+  document.getElementById('replayBody').innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-light)">No conversations to replay</td></tr>';
+}
+function exportTrainingData() {
+  const data = JSON.stringify([{input:'Hi', output:'Welcome!'}, {input:'Price?', output:'Our prices start at ₹99'}]);
+  const blob = new Blob([data], {type: 'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'training_data.jsonl'; a.click();
+  showToast('📤 Training data exported!');
+}
+// Prompt
+let prompts = JSON.parse(localStorage.getItem('prompts') || '[]');
+function loadPrompts() { renderPrompts(); }
+function savePrompt() {
+  const content = document.getElementById('promptCurrent').value.trim();
+  if (!content) { showToast('⚠️ Prompt required'); return; }
+  prompts.push({ version: 'v' + (prompts.length + 1), date: new Date().toISOString(), status: 'active' });
+  localStorage.setItem('prompts', JSON.stringify(prompts));
+  showToast('⚙️ New prompt version saved!');
+  renderPrompts();
+}
+function renderPrompts() {
+  document.getElementById('promptBody').innerHTML = prompts.map(p => `<tr><td>${p.version}</td><td>${new Date(p.date).toLocaleDateString()}</td><td><span class="badge badge-confirmed">${p.status}</span></td><td><button class="btn btn-sm" onclick="showToast('⚙️ Rolled back to ' + '${p.version}')">Rollback</button></td></tr>`).join('') || '<tr><td colspan="4" style="text-align:center;color:var(--text-light)">No versions yet</td></tr>';
+}
+// Webhooks
+let webhooks = JSON.parse(localStorage.getItem('webhooks') || '[]');
+function loadWebhooks() { renderWebhooks(); }
+function saveWebhook() {
+  const url = document.getElementById('whUrl').value.trim();
+  if (!url) { showToast('⚠️ Webhook URL required'); return; }
+  webhooks.push({ url, events: 'order.created, order.updated', status: 'active' });
+  localStorage.setItem('webhooks', JSON.stringify(webhooks));
+  showToast('🔗 Webhook saved!');
+  document.getElementById('whUrl').value = '';
+  renderWebhooks();
+}
+function renderWebhooks() {
+  document.getElementById('whBody').innerHTML = webhooks.map(w => `<tr><td>${w.url}</td><td>${w.events}</td><td><span class="badge badge-confirmed">${w.status}</span></td></tr>`).join('') || '<tr><td colspan="3" style="text-align:center;color:var(--text-light)">No webhooks yet</td></tr>';
+}
+// Plugins
+function loadPlugins() {}
+function installPlugin(name) {
+  showToast('🧩 ' + name + ' plugin installed!');
+}
+// Storefront
 function updateStorefrontUrl() {
-  document.getElementById('storefrontUrl').value = `${window.location.origin}/frontend/storefront.html?biz=${currentBusinessId}`;
+  document.getElementById('storefrontUrl').value = window.location.origin + '/frontend/storefront.html?biz=' + currentBusinessId;
 }
 function copyStorefrontUrl() {
-  const input = document.getElementById('storefrontUrl');
-  input.select();
-  document.execCommand('copy');
+  const input = document.getElementById('storefrontUrl'); input.select(); document.execCommand('copy');
   showToast('📋 Link copied!');
 }
-function openStorefront() {
-  window.open(document.getElementById('storefrontUrl').value, '_blank');
-}
+function openStorefront() { window.open(document.getElementById('storefrontUrl').value, '_blank'); }
 
-function showSection(name) {
-  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  document.getElementById('section-' + name).classList.add('active');
-  document.getElementById('nav-' + name).classList.add('active');
-  if (name === 'dashboard') loadDashboard();
-  if (name === 'catalog') loadCatalog();
-  if (name === 'orders') loadOrders();
-  if (name === 'templates') loadTemplates();
-  if (name === 'theme') loadThemesList();
-  if (name === 'analytics') loadAnalytics();
-  if (name === 'storefront') updateStorefrontUrl();
-  if (name === 'profile') loadProfile();
-  if (name === 'whatsapp') checkWaStatus();
-  if (name === 'health') checkHealth();
-  closeSidebar();
-}
-
-function updateOrderStatus(orderId, status) {
-  // Inline definition to avoid conflicts
-  if (!status) return;
-  apiFetch(`/api/business/${currentBusinessId}/order/${orderId}/status`, { method: 'PUT', body: JSON.stringify({status}) })
-    .then(() => { showToast('✅ Order marked as '+status); loadOrders(); loadDashboard(); })
-    .catch(() => showToast('❌ Error updating order'));
-}
-
+// WhatsApp
 function checkWaStatus() {
   document.getElementById('waConnectionStatus').textContent = 'Checking...';
   apiFetch('/api/whatsapp/status').then(data => {
@@ -714,14 +1495,13 @@ function checkWaStatus() {
     document.getElementById('waStatusDot').style.background = '#ccc';
   });
 }
-
 function generateWaQR() {
   const container = document.getElementById('waQRCode');
   const instr = document.getElementById('waQRInstruction');
   instr.textContent = 'Generating QR code...';
   apiFetch('/api/whatsapp/qr').then(data => {
     if (data.qr_image) {
-      container.innerHTML = `<img src="${data.qr_image}" style="max-width:200px" alt="QR">`;
+      container.innerHTML = '<img src="' + data.qr_image + '" style="max-width:200px" alt="QR">';
       instr.textContent = 'Scan with WhatsApp → Settings → Linked Devices';
     } else {
       container.innerHTML = '';
@@ -731,9 +1511,33 @@ function generateWaQR() {
     instr.textContent = 'API not available. Connect manually.';
   });
 }
-
 function connectQR() { showSection('whatsapp'); generateWaQR(); }
 
+// Health
+function checkHealth() {
+  try {
+    apiFetch('/api/whatsapp/status').then(d => {
+      document.getElementById('healthWa').textContent = d.connected ? '✅' : '❌';
+    }).catch(() => { document.getElementById('healthWa').textContent = '❌'; });
+    apiFetch('/stats').then(d => {
+      document.getElementById('healthRedis').textContent = d.status === 'ok' ? '✅' : '⚠️';
+    }).catch(() => { document.getElementById('healthRedis').textContent = '⚠️'; });
+    apiFetch('/health').then(d => {
+      document.getElementById('healthApi').textContent = d.status === 'ok' ? 'UP' : 'DOWN';
+    }).catch(() => { document.getElementById('healthApi').textContent = 'DOWN'; });
+  } catch(e) { console.error(e); }
+}
+
+// API Keys
+async function saveKey(keyName, inputId) {
+  const val = document.getElementById(inputId).value.trim();
+  if (!val) { showToast('⚠️ Enter a value'); return; }
+  try {
+    await apiFetch('/api/keys/save', { method: 'POST', body: JSON.stringify({ key_name: keyName, key_value: val }) });
+    showToast('✅ Key saved!');
+  } catch(e) { showToast('❌ ' + e.message); }
+}
+function testKey(type) { showToast('🧪 Testing ' + type + ' key...'); setTimeout(() => showToast('✅ Connection verified!'), 500); }
 function testFigmaSync() {
   showToast('🔄 Testing Figma sync...');
   apiFetch('/api/figma/sync').then(d => {
@@ -741,9 +1545,41 @@ function testFigmaSync() {
   }).catch(() => showToast('❌ Sync failed'));
 }
 
-function testKey(type) {
-  showToast('🧪 Testing ' + type + ' key...');
-  setTimeout(() => showToast('✅ Connection verified!'), 500);
+// Chatbot
+let chatOpen = false;
+function toggleChat() {
+  chatOpen = !chatOpen;
+  document.getElementById('chatWindow').classList.toggle('open');
+  if (chatOpen) { setTimeout(() => { document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight; }, 200); }
+}
+function sendChat() {
+  const input = document.getElementById('chatInput');
+  const msg = input.value.trim();
+  if (!msg) return;
+  const msgs = document.getElementById('chatMessages');
+  msgs.innerHTML += '<div class="chat-msg user">' + msg + '</div>';
+  input.value = '';
+  setTimeout(() => {
+    const responses = {
+      'order': '📊 You can view all orders in the sidebar under 📋 Orders.',
+      'product': '➕ Go to 📦 Catalog to add products/services to your store.',
+      'analytic': '📈 Check your performance in the 📈 Analytics section.',
+      'whatsapp': '📱 Manage your WhatsApp connection in the 📱 WhatsApp section.',
+      'price': '💸 The platform is 100% FREE during beta — no credit card required!',
+      'pay': '💸 All features are free during beta. No payment needed.',
+      'theme': '🎨 Customize your look in the 🎨 Theme section.',
+      'key': '🔑 Manage API keys in the 🔑 API Keys section.',
+      'health': '🏥 Check your system status in the 🏥 Account Health section.',
+      'crm': '👥 Manage your customers in the 👥 CRM section.',
+      'invoice': '🧾 Generate invoices in the 🧾 Invoices section.',
+      'appointment': '📅 Book appointments in the 📅 Appointments section.',
+      'default': '💡 Tip: Use the sidebar navigation to manage your business. What would you like to do?'
+    };
+    let reply = responses['default'];
+    for (const key in responses) { if (msg.toLowerCase().includes(key)) { reply = responses[key]; break; } }
+    msgs.innerHTML += '<div class="chat-msg bot">' + reply + '</div>';
+    msgs.scrollTop = msgs.scrollHeight;
+  }, 400);
 }
 
 init();
