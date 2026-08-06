@@ -24,6 +24,7 @@ if _SERVICES_DIR not in sys.path:
             sys.path.insert(0, _alt)
             print(f"[i] Trying alt path: {_alt}", flush=True)
 
+from typing import Optional
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -900,12 +901,14 @@ async def get_business_template(business_type: str):
 
 
 @app.post("/api/business/create")
-async def create_business_profile(request: Request, user: User = Depends(get_current_user)):
-    """Create a new business profile"""
+async def create_business_profile(request: Request, user: Optional[User] = Depends(get_current_user)):
+    """Create a new business profile (allows anonymous for onboarding)."""
     from business_profiles import BusinessProfile, BusinessType, BusinessTemplate, business_manager
     body = await request.json()
-    body["client_id"] = user.client_id or user.id
-    body["owner_id"] = str(user.id)
+    client_id = user.client_id or user.id if user else 1
+    owner_id = str(user.id) if user else "anonymous"
+    body["client_id"] = client_id
+    body["owner_id"] = owner_id
     try:
         bt = BusinessType(body.get("business_type", "custom"))
     except ValueError:

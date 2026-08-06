@@ -188,6 +188,10 @@ app.post('/send-media', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', whatsapp: client.info ? { number: client.info.wid.user, name: client.info.pushname } : 'disconnected' });
+});
+
 // QR endpoint - return latest QR or placeholder
 app.get('/qr', (req, res) => {
     if (latestQR) {
@@ -199,10 +203,6 @@ app.get('/qr', (req, res) => {
     } else {
         res.json({ qr: null, data_url: null, status: 'waiting' });
     }
-});
-
-app.get('/health', (req, res) => {
-    res.json({ status: 'ok', whatsapp: client.info ? { number: client.info.wid.user, name: client.info.pushname } : 'disconnected' });
 });
 
 const wss = new WebSocketServer({ port: WS_PORT });
