@@ -387,9 +387,9 @@
                         document.getElementById('qrStatus').textContent = '✅ WhatsApp Connected!';
                         document.getElementById('qrBtn').innerHTML = '✅ Connected';
                         document.getElementById('qrBtn').disabled = true;
-                        // Save API key if provided
-                        const apiKey = document.getElementById('waApiKey').value.trim();
-                        if (apiKey) await saveWhatsAppApiKey(apiKey);
+                        // Save API key if provided (optional field)
+                        const apiKeyEl = document.getElementById('waApiKey');
+                        if (apiKeyEl && apiKeyEl.value) await saveWhatsAppApiKey(apiKeyEl.value.trim());
                     }
                 } catch (e) { /* keep polling */ }
             }, 3000);
