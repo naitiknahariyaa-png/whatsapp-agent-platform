@@ -796,7 +796,9 @@ POST /api/webhooks</div>
       <div id="waStatusDot" style="width:16px;height:16px;border-radius:50%;background:#ccc"></div>
     </div>
     <div id="waQRSection" style="text-align:center;padding:20px;background:var(--surface2);border-radius:16px;border:1px solid var(--border);margin-bottom:16px">
-      <button class="btn" onclick="generateWaQR()">📱 Generate QR Code</button>
+      <button class="btn" id="waBtn" onclick="generateWaQR()">📱 Generate QR Code</button>
+      <button class="btn btn-secondary btn-sm" onclick="loadWaProfile()" style="margin-bottom:8px">📥 Load My Profile</button>
+      <button class="btn btn-secondary btn-sm" onclick="loadWaProfile()" style="margin-bottom:8px">📥 Load My Profile</button>
       <div id="waQRCode" style="margin-top:16px"></div>
       <div id="waQRInstruction" style="font-size:13px;color:var(--text-light);margin-top:8px">Click above to generate QR code</div>
     </div>
@@ -858,7 +860,7 @@ POST /api/webhooks</div>
 </div>
 
 <script>
-const API = window.location.origin.replace(/:\d+$/, '') + ':8000';
+const API = window.location.origin;
 let currentBusinessId = localStorage.getItem('bizId') || '';
 let selectedType = '';
 let selectedTheme = '';
@@ -1393,11 +1395,22 @@ function copyWidgetCode() {
 function loadQR() {}
 function generateQR() {
   const number = document.getElementById('qrNumber').value.trim();
-  const msg = document.getElementById('qrMessage').value.trim();
   if (!number) { showToast('⚠️ Enter WhatsApp number'); return; }
-  const url = 'https://wa.me/' + number + (msg ? '?text=' + encodeURIComponent(msg) : '');
-  document.getElementById('qrOutput').innerHTML = '<p style="margin-bottom:8px">Scan to chat:</p><img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(url) + '" alt="QR Code" style="border-radius:8px">';
-  showToast('📱 QR generated!');
+  const cleanNumber = number.replace(/[^\d]/g, '');
+  apiFetch('/api/whatsapp/qr?whatsapp_number=' + encodeURIComponent(cleanNumber)).then(data => {
+    if (data.qr_image) {
+      document.getElementById('qrOutput').innerHTML = '<p style="margin-bottom:8px">Scan to chat:</p><img src="' + data.qr_image + '" alt="QR Code" style="border-radius:8px">';
+      showToast('📱 QR generated!');
+    } else {
+      throw new Error('No QR image');
+    }
+  }).catch(() => {
+    // Fallback: use Click-to-Chat link directly
+    const msg = document.getElementById('qrMessage').value.trim();
+    const url = 'https://wa.me/' + cleanNumber + (msg ? '?text=' + encodeURIComponent(msg) : '');
+    document.getElementById('qrOutput').innerHTML = '<p style="margin-bottom:8px">Scan to chat:</p><a href="' + url + '" target="_blank" style="display:inline-block;padding:12px 24px;background:#25D366;color:#000;border-radius:8px;font-weight:700">🚀 Click to Open WhatsApp</a>';
+    showToast('📱 Using Click-to-Chat link!');
+  });
 }
 
 // Voice
@@ -1495,20 +1508,60 @@ function checkWaStatus() {
     document.getElementById('waStatusDot').style.background = '#ccc';
   });
 }
+function loadWaProfile() {
+  if (!currentBusinessId) { showToast('⚠️ Create business profile first in the Profile section'); return; }
+  apiFetch('/api/business/' + currentBusinessId).then(p => {
+    const phone = (p.contact_phone || '').replace(/[^\d]/g, '');
+    if (phone) {
+      localStorage.setItem('wa_phone', phone);
+      showToast('✅ Loaded business phone: +' + phone);
+    } else {
+      showToast('⚠️ No contact phone in business profile. Please add one in Profile.');
+    }
+  }).catch(() => {
+    showToast('⚠️ Could not load business profile. Enter phone manually and click Generate QR.');
+  });
+}
+
 function generateWaQR() {
   const container = document.getElementById('waQRCode');
   const instr = document.getElementById('waQRInstruction');
   instr.textContent = 'Generating QR code...';
-  apiFetch('/api/whatsapp/qr').then(data => {
+  btn = document.getElementById('waBtn');
+  if (btn) btn.disabled = true;
+  // Get business phone - try from profile or localStorage
+  let waNumber = localStorage.getItem('wa_phone') || '';
+  if (!waNumber && currentBusinessId) {
+    // Fetch business profile for phone
+    apiFetch('/api/business/' + currentBusinessId).then(p => {
+      waNumber = (p.contact_phone || '').replace(/[^\d]/g, '');
+      generateWaQRWithPhone(waNumber);
+    }).catch(() => {
+      generateWaQRWithPhone(waNumber);
+    });
+    return;
+  }
+  generateWaQRWithPhone(waNumber);
+}
+
+function generateWaQRWithPhone(waNumber) {
+  const container = document.getElementById('waQRCode');
+  const instr = document.getElementById('waQRInstruction');
+  const url = API + '/api/whatsapp/qr' + (waNumber ? '?whatsapp_number=' + encodeURIComponent(waNumber) : '');
+  fetch(url).then(res => res.json()).then(data => {
+    const btn = document.getElementById('waBtn');
+    if (btn) { btn.disabled = false; btn.innerHTML = '✅ QR Ready'; }
     if (data.qr_image) {
-      container.innerHTML = '<img src="' + data.qr_image + '" style="max-width:200px" alt="QR">';
-      instr.textContent = 'Scan with WhatsApp → Settings → Linked Devices';
+      container.innerHTML = '<img src="' + data.qr_image + '" style="max-width:200px" alt="WhatsApp QR Code">';
+      instr.innerHTML = '✅ Scannable QR! This QR opens a WhatsApp chat.<br><small style="color:var(--text-light)">' + (data.whatsapp_link || '') + '</small>';
     } else {
       container.innerHTML = '';
-      instr.textContent = data.message || 'Bridge not available. Connect later.';
+      instr.textContent = data.message || 'QR not available. Ensure business phone is set.';
     }
-  }).catch(() => {
-    instr.textContent = 'API not available. Connect manually.';
+  }).catch(e => {
+    const btn = document.getElementById('waBtn');
+    if (btn) { btn.disabled = false; btn.innerHTML = '📱 Generate QR Code'; }
+    instr.textContent = 'Error: ' + e.message + '. Check console for details.';
   });
 }
 function connectQR() { showSection('whatsapp'); generateWaQR(); }

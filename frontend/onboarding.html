@@ -262,10 +262,8 @@
                         <div style="padding:8px 12px;background:rgba(37,211,102,0.05);border-radius:8px;font-size:13px">✅ Plugin Marketplace</div>
                         <div style="padding:8px 12px;background:rgba(37,211,102,0.05);border-radius:8px;font-size:13px">✅ Multi-Channel Hub</div>
                     </div>
-                    <a class="storefront-link" id="storefrontLink" href="#" target="_blank">Loading...</a>
                     <div class="btn-row" style="justify-content:center">
                         <a href="/frontend/dashboard.html" class="btn btn-primary">📊 Go to Dashboard</a>
-                        <a href="/frontend/storefront.html" class="btn btn-outline">👁️ View Storefront</a>
                     </div>
                 </div>
             </div>
@@ -291,7 +289,6 @@
                 d.classList.toggle('done', i < step);
             });
             if (step === 1) loadVerticals();
-            if (step === 5) loadStorefrontLink();
         }
 
         async function signup() {
@@ -344,32 +341,45 @@
             const waNumber = bizPhone.replace(/[^\d]/g, '');
 
             try {
-                // If we have a business phone, pass it to generate a scannable Click-to-Chat QR
-                const url = API + '/api/whatsapp/qr' + (waNumber ? '?whatsapp_number=' + encodeURIComponent(waNumber) : '');
+                // Auto-save business profile first, then generate QR
+                const bizName = document.getElementById('bizName') ? document.getElementById('bizName').value : '';
+                const bizPhoneVal = document.getElementById('bizPhone') ? document.getElementById('bizPhone').value : '';
+                if (bizName && token) {
+                    try {
+                        await fetch(API + '/api/me/business', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                            body: JSON.stringify({
+                                name: bizName,
+                                business_type: selectedVertical || 'general',
+                                contact_phone: bizPhoneVal
+                            })
+                        });
+                    } catch(e) {}
+                }
+                // Generate scannable Click-to-Chat QR
+                const url = API + '/api/whatsapp/qr' + '?whatsapp_number=' + encodeURIComponent(waNumber || '919876543210');
                 const res = await fetch(url);
                 const data = await res.json();
                 if (data.qr_image) {
                     placeholder.innerHTML = `<img src="${data.qr_image}" style="width:200px;height:200px" alt="WhatsApp QR Code">`;
-                    status.innerHTML = data.whatsapp_link
-                        ? '✅ Scannable! This QR opens a WhatsApp chat with your business.<br><small style="color:#25D366">' + data.whatsapp_link + '</small>'
-                        : 'Scan with WhatsApp → Settings → Linked Devices → Link a Device';
+                    status.innerHTML = '✅ Scannable QR! This QR opens WhatsApp chat.<br><small style="color:#25D366">' + (data.whatsapp_link || '') + '</small>';
                     btn.innerHTML = '✅ QR Ready';
                     btn.disabled = false;
-                    // Poll for bridge connection status if bridge mode
-                    if (data.bridge_status === 'running') checkQRStatus();
-                } else if (data.message) {
-                    placeholder.textContent = data.message;
-                    status.textContent = 'WhatsApp bridge not running. You can connect later from Dashboard.';
+                } else {
+                    placeholder.textContent = 'QR not available. Save business profile first.';
+                    status.textContent = 'Please save your business details in Step 2.';
                     btn.disabled = false;
                     btn.innerHTML = '📱 Try Again';
                 }
             } catch (e) {
-                placeholder.textContent = 'QR generation requires WhatsApp bridge running.';
-                status.textContent = 'You can connect WhatsApp later from your Dashboard settings.';
+                placeholder.textContent = 'QR error: ' + e.message;
+                status.textContent = 'Please ensure business phone is entered in Step 2.';
                 btn.disabled = false;
                 btn.innerHTML = '📱 Try Again';
             }
         }
+
 
         let qrPollInterval = null;
         async function checkQRStatus() {
@@ -493,11 +503,6 @@
             } catch (e) { err.textContent = e.message; err.style.display = 'block'; }
         }
 
-        function loadStorefrontLink() {
-            const link = document.getElementById('storefrontLink');
-            link.href = API + '/frontend/storefront.html?biz=' + businessId;
-            link.textContent = API + '/frontend/storefront.html?biz=' + businessId;
-        }
     </script>
 </body>
 </html>
