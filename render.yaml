@@ -40,3 +40,24 @@ services:
         sync: false
       - key: META_VERIFY_TOKEN
         sync: false
+
+  - type: web
+    name: whatsapp-agent-bridge
+    env: node
+    plan: starter
+    buildCommand: cd whatsapp-bridge && npm install
+    startCommand: cd whatsapp-bridge && node bridge.js
+    healthCheckPath: /health
+    envVars:
+      - key: AGENT_API_URL
+        value: https://whatsapp-agent-platform-1.onrender.com
+      - key: WS_PORT
+        value: 3002
+      - key: HTTP_PORT
+        value: 3001
+      - key: WA_BRIDGE_SECRET
+        sync: false
+    disk:
+      name: whatsapp-bridge-data
+      mountPath: /opt/render/project/src/whatsapp-bridge
+      sizeGB: 1

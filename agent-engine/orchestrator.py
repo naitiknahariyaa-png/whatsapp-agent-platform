@@ -13,6 +13,13 @@ from config import settings
 from state_machine import get_state_machine
 from handoff import request_handoff
 
+try:
+    from langchain_agent import langchain_agent
+    LANGCHAIN_ENABLED = True
+except ImportError:
+    LANGCHAIN_ENABLED = False
+    print("[i] LangChain agent not available, using built-in AI")
+
 
 class IntentDetector:
     """Uses LLM to detect user intent from message and extract structured entities"""
@@ -318,14 +325,47 @@ class AgentOrchestrator:
             if vertical_response:
                 response = vertical_response
             else:
-                # Generate response using LLM with state context
-                response = await self.response_generator.generate(
-                    intent=intent,
-                    message=message,
-                    history=history_dicts,
-                    contact=contact_dict,
-                    vertical=self.vertical_name
-                )
+                # Try LangChain agent first (with knowledge base retrieval)
+                if LANGCHAIN_ENABLED and langchain_agent.available:
+                    try:
+                        # Load business context for the agent
+                        biz_context = None
+                        try:
+                            from business_profiles import business_manager
+                            for p in business_manager.profiles.values():
+                                if p.client_id == int(client_id):
+                                    biz_context = {
+                                        "name": p.name,
+                                        "business_type": p.business_type.value if hasattr(p.business_type, 'value') else str(p.business_type),
+                                    }
+                                    break
+                        except Exception:
+                            pass
+
+                        response = await langchain_agent.generate_response(
+                            message=message,
+                            history=history_dicts,
+                            client_id=client_id,
+                            business_context=biz_context
+                        )
+                    except Exception as e:
+                        print(f"[!] LangChain agent failed, falling back: {e}")
+                        response = await self.response_generator.generate(
+                            intent=intent,
+                            message=message,
+                            history=history_dicts,
+                            contact=contact_dict,
+                            vertical=self.vertical_name
+                        )
+                else:
+                    # Fallback to built-in LLM response generator
+                    response = await self.response_generator.generate(
+                        intent=intent,
+                        message=message,
+                        history=history_dicts,
+                        contact=contact_dict,
+                        vertical=self.vertical_name
+                    )
 
             # Handle appointment booking - save to DB if we have date/time
             if intent == "appointment_booking" and entities.get("date"):

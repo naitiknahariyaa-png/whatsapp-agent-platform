@@ -102,7 +102,6 @@
                         </label>
                     </div>
                 </div>
-                <div class="error-msg" id="signupError"></div>
                 <div class="btn-row">
                     <a href="/frontend/login.html" class="btn btn-outline">Already have account? Login</a>
                     <button class="btn btn-primary" onclick="signup()">Create Account →</button>
@@ -339,17 +338,27 @@
             btn.disabled = true;
             btn.innerHTML = '<span class="spinner"></span> Generating...';
             status.textContent = 'Generating QR code...';
+
+            // Get business phone for Click-to-Chat QR
+            const bizPhone = (document.getElementById('bizPhone') || {}).value || '';
+            const waNumber = bizPhone.replace(/[^\d]/g, '');
+
             try {
-                const res = await fetch(API + '/api/whatsapp/qr', {
+                // If we have a business phone, pass it to generate a scannable Click-to-Chat QR
+                const url = API + '/api/whatsapp/qr' + (waNumber ? '?whatsapp_number=' + encodeURIComponent(waNumber) : '');
+                const res = await fetch(url, {
                     headers: { 'Authorization': 'Bearer ' + token }
                 });
                 const data = await res.json();
                 if (data.qr_image) {
                     placeholder.innerHTML = `<img src="${data.qr_image}" style="width:200px;height:200px" alt="WhatsApp QR Code">`;
-                    status.textContent = 'Scan with WhatsApp → Settings → Linked Devices → Link a Device';
-                    btn.innerHTML = '✅ Waiting for scan...';
-                    // Poll for connection status
-                    checkQRStatus();
+                    status.innerHTML = data.whatsapp_link
+                        ? '✅ Scannable! This QR opens a WhatsApp chat with your business.<br><small style="color:#25D366">' + data.whatsapp_link + '</small>'
+                        : 'Scan with WhatsApp → Settings → Linked Devices → Link a Device';
+                    btn.innerHTML = '✅ QR Ready';
+                    btn.disabled = false;
+                    // Poll for bridge connection status if bridge mode
+                    if (data.bridge_status === 'running') checkQRStatus();
                 } else if (data.message) {
                     placeholder.textContent = data.message;
                     status.textContent = 'WhatsApp bridge not running. You can connect later from Dashboard.';

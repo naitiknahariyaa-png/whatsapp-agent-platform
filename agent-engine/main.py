@@ -747,8 +747,33 @@ async def connect_whatsapp_meta(request: Request, user: User = Depends(get_curre
 
 
 @app.get("/api/whatsapp/qr")
-async def whatsapp_qr(user: User = Depends(get_current_user)):
-    """Get WhatsApp QR code for local bridge (requires bridge running locally)."""
+async def whatsapp_qr(user: User = Depends(get_current_user), whatsapp_number: str = ""):
+    """Get scannable WhatsApp QR code (deep link). Works without bridge - generates a QR that opens WhatsApp chat."""
+    import qrcode
+    import base64
+    from io import BytesIO
+
+    # If a WhatsApp number is provided, generate a scannable "Click to Chat" QR
+    if whatsapp_number:
+        phone = whatsapp_number.replace(" ", "").replace("-", "").replace("+", "")
+        wa_link = f"https://wa.me/{phone}"
+        qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
+        qr.add_data(wa_link)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buffer = BytesIO()
+        img.save(buffer, format="PNG")
+        img_b64 = base64.b64encode(buffer.getvalue()).decode()
+        return {
+            "qr_image": f"data:image/png;base64,{img_b64}",
+            "qr_raw": wa_link,
+            "status": "ready",
+            "whatsapp_link": wa_link,
+            "message": "Scan this QR to chat with this business on WhatsApp",
+            "bridge_status": "not_required"
+        }
+
+    # Try local bridge if available
     import httpx
     bridge_url = settings.whatsapp_bridge_url or "http://localhost:3001"
     try:
@@ -767,9 +792,51 @@ async def whatsapp_qr(user: User = Depends(get_current_user)):
     except Exception:
         return {
             "qr_image": None,
-            "message": "WhatsApp bridge is not running. Start it with: cd whatsapp-bridge && node bridge.js",
+            "message": "Provide a whatsapp_number to generate a scannable Click-to-Chat QR, or run the bridge locally",
             "bridge_status": "offline"
         }
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Base (Vector Store) Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/knowledge/stats")
+async def knowledge_stats(user: User = Depends(get_current_user)):
+    """Get vector store statistics."""
+    from vector_store import get_collection_stats
+    cid = _get_my_client_id(user)
+    return get_collection_stats(cid)
+
+
+@app.post("/api/knowledge/upload")
+async def knowledge_upload(request: Request, user: User = Depends(get_current_user)):
+    """Upload a knowledge base item for semantic search."""
+    from vector_store import add_knowledge_item
+    body = await request.json()
+    title = body.get("title", "")
+    content = body.get("content", "")
+    category = body.get("category", "general")
+    tags = body.get("tags", [])
+    if not title or not content:
+        raise HTTPException(status_code=400, detail="title and content required")
+    cid = _get_my_client_id(user)
+    ids = add_knowledge_item(cid, title, content, category, tags)
+    return {"status": "added", "ids": ids, "count": len(ids)}
+
+
+@app.post("/api/knowledge/query")
+async def knowledge_query(request: Request, user: User = Depends(get_current_user)):
+    """Semantic search in knowledge base."""
+    from vector_store import search_knowledge
+    body = await request.json()
+    query = body.get("query", "")
+    category = body.get("category", "")
+    if not query:
+        raise HTTPException(status_code=400, detail="query required")
+    cid = _get_my_client_id(user)
+    results = search_knowledge(cid, query, category or None)
+    return {"results": results, "count": len(results)}
 
 
 @app.get("/api/whatsapp/status")
