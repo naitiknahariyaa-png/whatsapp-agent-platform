@@ -14,7 +14,7 @@ import os
 
 # Try PostgreSQL first, fallback to SQLite
 DATABASE_URL = os.getenv("DATABASE_URL", "")
-if not DATABASE_URL or DATABASE_URL == "postgresql+asyncpg://wap_user:wap_pass_123@localhost:5432/wap_crm":
+if not DATABASE_URL:
     # Use absolute path to avoid DB being created in wrong directory
     DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wap_data.db")
     DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"

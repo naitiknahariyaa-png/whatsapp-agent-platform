@@ -723,12 +723,32 @@ async def delete_user_data(contact_id: str, client_id: int = 1):
     return {"status": "deleted" if success else "failed"}
 
 # ---------------------------------------------------------------------------
-# WhatsApp Connection Endpoints
+# WhatsApp Connection Endpoints (Meta Cloud API + Local Bridge)
 # ---------------------------------------------------------------------------
+
+@app.post("/api/whatsapp/connect")
+async def connect_whatsapp_meta(request: Request, user: User = Depends(get_current_user)):
+    """Connect WhatsApp via Meta Cloud API (official, no QR needed)."""
+    body = await request.json()
+    access_token = body.get("access_token", "")
+    phone_number_id = body.get("phone_number_id", "")
+    if not access_token or not phone_number_id:
+        raise HTTPException(status_code=400, detail="access_token and phone_number_id required")
+    # Store in user's business profile
+    from business_profiles import business_manager
+    cid = _get_my_client_id(user)
+    for p in business_manager.profiles.values():
+        if p.client_id == cid:
+            p.meta_access_token = access_token
+            p.meta_phone_number_id = phone_number_id
+            business_manager._save()
+            return {"status": "connected", "message": "WhatsApp connected via Meta Cloud API"}
+    raise HTTPException(status_code=404, detail="Create business profile first")
+
 
 @app.get("/api/whatsapp/qr")
 async def whatsapp_qr(user: User = Depends(get_current_user)):
-    """Get WhatsApp QR code for connection (requires bridge running)."""
+    """Get WhatsApp QR code for local bridge (requires bridge running locally)."""
     import httpx
     bridge_url = settings.whatsapp_bridge_url or "http://localhost:3001"
     try:
