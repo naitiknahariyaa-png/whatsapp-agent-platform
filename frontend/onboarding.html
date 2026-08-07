@@ -346,9 +346,7 @@
             try {
                 // If we have a business phone, pass it to generate a scannable Click-to-Chat QR
                 const url = API + '/api/whatsapp/qr' + (waNumber ? '?whatsapp_number=' + encodeURIComponent(waNumber) : '');
-                const res = await fetch(url, {
-                    headers: { 'Authorization': 'Bearer ' + token }
-                });
+                const res = await fetch(url);
                 const data = await res.json();
                 if (data.qr_image) {
                     placeholder.innerHTML = `<img src="${data.qr_image}" style="width:200px;height:200px" alt="WhatsApp QR Code">`;

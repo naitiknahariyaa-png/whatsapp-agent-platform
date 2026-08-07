@@ -747,54 +747,35 @@ async def connect_whatsapp_meta(request: Request, user: User = Depends(get_curre
 
 
 @app.get("/api/whatsapp/qr")
-async def whatsapp_qr(user: User = Depends(get_current_user), whatsapp_number: str = ""):
-    """Get scannable WhatsApp QR code (deep link). Works without bridge - generates a QR that opens WhatsApp chat."""
+async def whatsapp_qr(whatsapp_number: str = ""):
+    """Generate a scannable WhatsApp QR code. Public endpoint - no auth needed.
+    If whatsapp_number is provided, generates a Click-to-Chat QR (https://wa.me/PHONE).
+    Otherwise returns a placeholder QR for the platform."""
     import qrcode
     import base64
     from io import BytesIO
 
-    # If a WhatsApp number is provided, generate a scannable "Click to Chat" QR
-    if whatsapp_number:
-        phone = whatsapp_number.replace(" ", "").replace("-", "").replace("+", "")
-        wa_link = f"https://wa.me/{phone}"
-        qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
-        qr.add_data(wa_link)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-        buffer = BytesIO()
-        img.save(buffer, format="PNG")
-        img_b64 = base64.b64encode(buffer.getvalue()).decode()
-        return {
-            "qr_image": f"data:image/png;base64,{img_b64}",
-            "qr_raw": wa_link,
-            "status": "ready",
-            "whatsapp_link": wa_link,
-            "message": "Scan this QR to chat with this business on WhatsApp",
-            "bridge_status": "not_required"
-        }
+    # Default to a sample number if none provided
+    phone = whatsapp_number.replace(" ", "").replace("-", "").replace("+", "") if whatsapp_number else "919876543210"
+    wa_link = f"https://wa.me/{phone}"
 
-    # Try local bridge if available
-    import httpx
-    bridge_url = settings.whatsapp_bridge_url or "http://localhost:3001"
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{bridge_url}/qr", timeout=5)
-            if resp.status_code == 200:
-                data = resp.json()
-                return {
-                    "qr_image": data.get("data_url"),
-                    "qr_raw": data.get("qr"),
-                    "status": data.get("status", "unknown"),
-                    "message": "Scan this QR with WhatsApp" if data.get("status") == "ready" else "Waiting for QR... Open the bridge terminal to scan",
-                    "bridge_status": "running"
-                }
-            return {"qr_image": None, "message": "WhatsApp bridge not responding", "bridge_status": "offline"}
-    except Exception:
-        return {
-            "qr_image": None,
-            "message": "Provide a whatsapp_number to generate a scannable Click-to-Chat QR, or run the bridge locally",
-            "bridge_status": "offline"
-        }
+    # Generate scannable QR
+    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
+    qr.add_data(wa_link)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    img_b64 = base64.b64encode(buffer.getvalue()).decode()
+
+    return {
+        "qr_image": f"data:image/png;base64,{img_b64}",
+        "qr_raw": wa_link,
+        "status": "ready",
+        "whatsapp_link": wa_link,
+        "message": "Scan this QR to chat on WhatsApp",
+        "bridge_status": "not_required"
+    }
 
 
 # ---------------------------------------------------------------------------

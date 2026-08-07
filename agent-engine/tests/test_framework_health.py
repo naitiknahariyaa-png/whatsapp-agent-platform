@@ -224,9 +224,13 @@ def test_secrets_manager():
     assert all(isinstance(v, bool) for v in summary.values())
 
 
-def test_whatsapp_qr_requires_auth(client):
+def test_whatsapp_qr_public(client):
     resp = client.get("/api/whatsapp/qr")
-    assert resp.status_code == 401
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("status") == "ready"
+    assert data.get("qr_image", "").startswith("data:image/png;base64,")
+    assert "wa.me" in data.get("whatsapp_link", "")
 
 
 def test_whatsapp_status_requires_auth(client):
