@@ -74,6 +74,7 @@ class WhatsAppConnector:
                 env = os.environ.copy()
                 env["HTTP_PORT"] = str(BRIDGE_HTTP_PORT)
                 env["WS_PORT"] = str(BRIDGE_WS_PORT)
+                env["MAX_MEMORY_MB"] = os.getenv("MAX_MEMORY_MB", "256")
                 env["AGENT_API_URL"] = f"http://localhost:{os.getenv('PORT', '8000')}"
                 
                 self.bridge_process = subprocess.Popen(

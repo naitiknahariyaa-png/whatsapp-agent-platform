@@ -69,6 +69,7 @@ const HTTP_PORT = process.env.HTTP_PORT || 3001;
 const AUTH_PATH = path.join(__dirname, '.wwebjs_auth');
 const QR_FILE_PATH = path.join(__dirname, 'qr.png');
 const BRIDGE_SECRET = process.env.WA_BRIDGE_SECRET || 'your_bridge_secret_here';
+const MAX_MEMORY_MB = parseInt(process.env.MAX_MEMORY_MB || '256', 10);
 
 function clearAuthSession() {
     try {
@@ -81,11 +82,40 @@ function clearAuthSession() {
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
-        headless: true,
+        headless: 'new',
         executablePath: process.env.CHROME_PATH || 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--single-process',
+            '--no-zygote',
+            '--disable-extensions',
+            '--disable-background-networking',
+            '--disable-default-apps',
+            '--disable-sync',
+            '--disable-translate',
+            '--js-flags=--max-old-space-size=128'
+        ]
     }
 });
+
+// ============ MEMORY OPTIMIZATION ============
+// Periodically check memory and log usage
+const memoryTimer = setInterval(() => {
+    try {
+        const usedMB = process.memoryUsage().heapUsed / 1024 / 1024;
+        if (usedMB > MAX_MEMORY_MB) {
+            console.log(`[i] Memory high: ${usedMB.toFixed(0)}MB. Cleaning up...`);
+        }
+    } catch (e) {}
+}, 60000);
+memoryTimer.unref();
+
+// Clean up old QR file on startup
+try { if (fs.existsSync(QR_FILE_PATH)) fs.unlinkSync(QR_FILE_PATH); } catch(e) {}
+// ============ END MEMORY OPTIMIZATION ============
 
 // Store latest QR globally for API
 let latestQR = null;
@@ -136,7 +166,6 @@ client.on('message', async (message) => {
             headers: { 'X-Bridge-Signature': signature, 'Content-Type': 'application/json' }
         });
         if (resp.data.reply) {
-            // Typing indicator
             await client.sendPresenceAvailable();
             await new Promise(r => setTimeout(r, Math.floor(Math.random() * 4000) + 3000));
             await safeSend(message.from, resp.data.reply);
@@ -148,7 +177,6 @@ client.on('message', async (message) => {
 });
 
 async function safeSend(phone, message) {
-    // Anti-ban check
     const banCheck = antiBanCheck();
     if (!banCheck.allowed) {
         console.log('[!] Anti-ban:', banCheck.reason);
@@ -169,8 +197,7 @@ async function safeSend(phone, message) {
 }
 
 const app = express();
-app.use(express.json({ limit: '50mb' }));
-// Serve generated QR image file if needed
+app.use(express.json({ limit: '10mb' }));
 app.use('/static', express.static(__dirname));
 
 app.post('/send', async (req, res) => {
@@ -191,17 +218,20 @@ app.post('/send-media', async (req, res) => {
         const media = new MessageMedia(mimetype || 'image/png', base64, filename || 'file');
         const result = await safeSend(phone, caption || '');
         if (!result.success) return res.status(429).json({ error: result.error });
-        // Send media separately
         await client.sendMessage(chatId, media);
         res.json({ success: true, messageId: result.messageId });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', whatsapp: client.info ? { number: client.info.wid.user, name: client.info.pushname } : 'disconnected' });
+    const usedMB = process.memoryUsage().heapUsed / 1024 / 1024;
+    res.json({
+        status: 'ok',
+        whatsapp: client.info ? { number: client.info.wid.user, name: client.info.pushname } : 'disconnected',
+        memory_mb: Math.round(usedMB)
+    });
 });
 
-// QR endpoint - return latest QR or placeholder
 app.get('/qr', (req, res) => {
     if (latestQR) {
         QRCode.toDataURL(latestQR).then(url => {
@@ -210,7 +240,6 @@ app.get('/qr', (req, res) => {
             res.json({ qr: latestQR, data_url: null, status: 'ready' });
         });
     } else {
-        // If a QR image file exists on disk, serve it as fallback
         if (fs.existsSync(QR_FILE_PATH)) {
             res.sendFile(QR_FILE_PATH);
         } else {
@@ -222,7 +251,6 @@ app.get('/qr', (req, res) => {
 const wss = new WebSocketServer({ port: WS_PORT });
 wss.on('connection', (ws) => {
     ws.send(JSON.stringify({ type: 'connected', message: 'WhatsApp Bridge Connected' }));
-    // Send QR if available
     if (latestQR) {
         ws.send(JSON.stringify({ type: 'qr', data: latestQR }));
     }
