@@ -20,6 +20,13 @@ except ImportError:
     LANGCHAIN_ENABLED = False
     print("[i] LangChain agent not available, using built-in AI")
 
+try:
+    from skills.loader import build_prompt as skill_build_prompt
+    SKILLS_AVAILABLE = True
+except ImportError:
+    SKILLS_AVAILABLE = False
+    print("[i] Skills loader not available")
+
 
 class IntentDetector:
     """Uses LLM to detect user intent from message and extract structured entities"""
@@ -167,6 +174,14 @@ class ResponseGenerator:
             context = "\n".join([f"{'User' if h['direction'] == 'incoming' else 'Bot'}: {h['content']}" 
                                 for h in history[-5:]])
 
+        # Try to augment with skills if available
+        skill_prompt = ""
+        if SKILLS_AVAILABLE:
+            try:
+                skill_prompt = skill_build_prompt(vertical, message) or ""
+            except Exception as e:
+                print(f"[!] Skill prompt build failed: {e}")
+
         prompt = f"""You are a helpful WhatsApp AI assistant for a {vertical} business.
 You respond in Hinglish (Hindi + English mix) - casual, friendly, and professional.
 
@@ -174,6 +189,8 @@ You respond in Hinglish (Hindi + English mix) - casual, friendly, and profession
 
 Previous conversation:
 {context}
+
+{skill_prompt}
 
 User's intent: {intent}
 User message: {message}

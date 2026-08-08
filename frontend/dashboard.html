@@ -9,7 +9,7 @@
 :root {
   --primary: #25D366;
   --secondary: #128C7E;
-  --bg: #0a0a0f;
+  --bg: #336145;
   --surface: #14141c;
   --surface2: #1a1a24;
   --text: #e8e8f0;
@@ -19,7 +19,7 @@
   --shadow: 0 2px 12px rgba(0,0,0,0.3);
   --radius: 12px;
   --transition: all 0.2s ease;
-  --danger: #ff6b6b;
+  --danger: #ff1010;
   --warning: #ffd93d;
   --info: #4fc3f7;
 }
@@ -796,11 +796,10 @@ POST /api/webhooks</div>
       <div id="waStatusDot" style="width:16px;height:16px;border-radius:50%;background:#ccc"></div>
     </div>
     <div id="waQRSection" style="text-align:center;padding:20px;background:var(--surface2);border-radius:16px;border:1px solid var(--border);margin-bottom:16px">
-      <button class="btn" id="waBtn" onclick="generateWaQR()">📱 Generate QR Code</button>
-      <button class="btn btn-secondary btn-sm" onclick="loadWaProfile()" style="margin-bottom:8px">📥 Load My Profile</button>
-      <button class="btn btn-secondary btn-sm" onclick="loadWaProfile()" style="margin-bottom:8px">📥 Load My Profile</button>
+      <button class="btn" id="waBtn" onclick="connectWhatsApp()">📱 Connect WhatsApp</button>
       <div id="waQRCode" style="margin-top:16px"></div>
-      <div id="waQRInstruction" style="font-size:13px;color:var(--text-light);margin-top:8px">Click above to generate QR code</div>
+      <div id="waQRInstruction" style="font-size:13px;color:var(--text-light);margin-top:8px">Click to start WhatsApp connection</div>
+      <div id="waBridgeStatus" style="margin-top:12px;font-size:12px;color:var(--text-light)"></div>
     </div>
     <div style="padding:16px;background:rgba(37,211,102,0.05);border-radius:12px">
       <div style="font-size:14px;font-weight:600;margin-bottom:8px">📲 How to connect:</div>
@@ -1498,16 +1497,139 @@ function copyStorefrontUrl() {
 function openStorefront() { window.open(document.getElementById('storefrontUrl').value, '_blank'); }
 
 // WhatsApp
+let bridgeConnected = false;
+let bridgePollInterval = null;
+
 function checkWaStatus() {
   document.getElementById('waConnectionStatus').textContent = 'Checking...';
-  apiFetch('/api/whatsapp/status').then(data => {
-    document.getElementById('waConnectionStatus').textContent = data.connected ? '✅ Connected' : 'Not connected';
-    document.getElementById('waStatusDot').style.background = data.connected ? '#25D366' : '#ccc';
+  // Check both bridge status and Meta API status
+  Promise.all([
+    apiFetch('/api/whatsapp/status').catch(() => ({ connected: false, bridge_status: 'offline' })),
+    apiFetch('/api/whatsapp/bridge-qr').catch(() => ({ status: 'offline' }))
+  ]).then(([waStatus, bridgeStatus]) => {
+    const connected = waStatus.connected || bridgeStatus.status === 'ready';
+    document.getElementById('waConnectionStatus').textContent = connected ? '✅ Connected' : 'Not connected';
+    document.getElementById('waStatusDot').style.background = connected ? '#25D366' : '#ccc';
+    bridgeConnected = connected;
   }).catch(() => {
     document.getElementById('waConnectionStatus').textContent = 'Not connected';
     document.getElementById('waStatusDot').style.background = '#ccc';
   });
 }
+
+async function connectWhatsApp() {
+  const btn = document.getElementById('waBtn');
+  const qrContainer = document.getElementById('waQRCode');
+  const instr = document.getElementById('waQRInstruction');
+  const statusDiv = document.getElementById('waBridgeStatus');
+  
+  btn.disabled = true;
+  btn.textContent = '🔄 Connecting...';
+  instr.textContent = 'Checking bridge status...';
+  qrContainer.innerHTML = '';
+  
+  try {
+    // Try to get QR from local bridge
+    const bridgeStatus = await apiFetch('/api/whatsapp/bridge-qr');
+    
+    if (bridgeStatus.status === 'ready' && bridgeStatus.qr) {
+      // Bridge is running and has QR
+      qrContainer.innerHTML = '<img src="' + bridgeStatus.data_url + '" style="max-width:250px;border-radius:8px" alt="Scan QR"><br><small>Scan with WhatsApp → Linked Devices</small>';
+      instr.textContent = '✅ QR code ready! Scan with your phone.';
+      statusDiv.textContent = 'Bridge QR loaded - waiting for scan...';
+      btn.textContent = '🔄 Refresh QR';
+      btn.disabled = false;
+      
+      // Poll for connection
+      startBridgePolling();
+    } else if (bridgeStatus.status === 'waiting') {
+      // Bridge is running but no QR yet
+      qrContainer.innerHTML = '<div style="padding:20px;color:var(--text-light)">⏳ Waiting for QR code...<br><small>Open WhatsApp on your phone first</small></div>';
+      instr.textContent = 'Bridge is running. Please open WhatsApp on your phone.';
+      statusDiv.textContent = 'Bridge connected - waiting for QR';
+      btn.textContent = '🔄 Refresh';
+      btn.disabled = false;
+      
+      // Poll for QR
+      pollForQR();
+    } else {
+      // Bridge not running
+      throw new Error('Bridge not running');
+    }
+  } catch (e) {
+    // Bridge not available - show instructions
+    qrContainer.innerHTML = `
+      <div style="padding:20px;text-align:left;background:rgba(255,217,61,0.1);border-radius:12px;border:1px solid rgba(255,217,61,0.3)">
+        <div style="font-size:14px;font-weight:600;margin-bottom:12px;color:var(--warning)">⚠️ WhatsApp Bridge Not Running</div>
+        <div style="font-size:13px;color:var(--text-light);line-height:1.6">
+          <strong style="color:var(--text)">To connect WhatsApp:</strong><br><br>
+          1. Open terminal in <code>whatsapp-bridge</code> folder<br>
+          2. Run: <code style="background:var(--surface);padding:2px 6px;border-radius:4px">node bridge.js</code><br>
+          3. Scan QR code in terminal with your phone<br>
+          4. Bridge will connect automatically<br><br>
+          <strong style="color:var(--text)">Requirements:</strong><br>
+          • Chrome/Chromium browser installed<br>
+          • WhatsApp on your phone<br>
+          • Node.js installed
+        </div>
+      </div>
+    `;
+    instr.textContent = 'Start the bridge locally to connect WhatsApp';
+    statusDiv.textContent = 'Bridge offline - start with: cd whatsapp-bridge && node bridge.js';
+    btn.textContent = '🔄 Retry';
+    btn.disabled = false;
+  }
+}
+
+async function pollForQR() {
+  const qrContainer = document.getElementById('waQRCode');
+  const instr = document.getElementById('waQRInstruction');
+  
+  const maxAttempts = 30;
+  let attempts = 0;
+  
+  const interval = setInterval(async () => {
+    attempts++;
+    if (attempts > maxAttempts) {
+      clearInterval(interval);
+      instr.textContent = 'Timeout waiting for QR. Please refresh and try again.';
+      return;
+    }
+    
+    try {
+      const bridgeStatus = await apiFetch('/api/whatsapp/bridge-qr');
+      if (bridgeStatus.status === 'ready' && bridgeStatus.qr) {
+        clearInterval(interval);
+        qrContainer.innerHTML = '<img src="' + bridgeStatus.data_url + '" style="max-width:250px;border-radius:8px" alt="Scan QR"><br><small>Scan with WhatsApp → Linked Devices</small>';
+        instr.textContent = '✅ QR code ready! Scan with your phone.';
+        startBridgePolling();
+      }
+    } catch (e) {
+      console.error('QR poll error:', e);
+    }
+  }, 2000);
+}
+
+function startBridgePolling() {
+  if (bridgePollInterval) clearInterval(bridgePollInterval);
+  
+  bridgePollInterval = setInterval(async () => {
+    try {
+      const status = await apiFetch('/api/whatsapp/status');
+      if (status.connected) {
+        bridgeConnected = true;
+        document.getElementById('waConnectionStatus').textContent = '✅ Connected: ' + (status.number || '');
+        document.getElementById('waStatusDot').style.background = '#25D366';
+        document.getElementById('waBridgeStatus').textContent = 'Connected and ready!';
+        document.getElementById('waQRInstruction').textContent = '✅ WhatsApp is connected and working!';
+        clearInterval(bridgePollInterval);
+      }
+    } catch (e) {
+      console.error('Bridge poll error:', e);
+    }
+  }, 3000);
+}
+
 function loadWaProfile() {
   if (!currentBusinessId) { showToast('⚠️ Create business profile first in the Profile section'); return; }
   apiFetch('/api/business/' + currentBusinessId).then(p => {
@@ -1564,7 +1686,7 @@ function generateWaQRWithPhone(waNumber) {
     instr.textContent = 'Error: ' + e.message + '. Check console for details.';
   });
 }
-function connectQR() { showSection('whatsapp'); generateWaQR(); }
+function connectQR() { showSection('whatsapp'); connectWhatsApp(); }
 
 // Health
 function checkHealth() {
