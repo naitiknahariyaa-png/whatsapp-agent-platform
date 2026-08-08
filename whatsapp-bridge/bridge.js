@@ -68,6 +68,7 @@ const WS_PORT = process.env.WS_PORT || 3002;
 const HTTP_PORT = process.env.HTTP_PORT || 3001;
 const AUTH_PATH = path.join(__dirname, '.wwebjs_auth');
 const QR_FILE_PATH = path.join(__dirname, 'qr.png');
+const BRIDGE_SECRET = process.env.WA_BRIDGE_SECRET || 'your_bridge_secret_here';
 
 function clearAuthSession() {
     try {
@@ -105,6 +106,7 @@ client.on('qr', async (qr) => {
 
 client.on('authenticated', () => {
     console.log('[✓] WhatsApp authenticated');
+    latestQR = null; // clear stored QR after successful auth
     try { if (fs.existsSync(QR_FILE_PATH)) fs.unlinkSync(QR_FILE_PATH); } catch (e) {}
 });
 
@@ -123,11 +125,16 @@ client.on('message', async (message) => {
     console.log(`[IN] ${message.from}: ${message.body.substring(0, 80)}`);
 
     try {
-        const resp = await axios.post(`${AGENT_API_URL}/webhook`, {
+        const payload = JSON.stringify({
             from: message.from.replace('@c.us', ''),
             to: message.to.replace('@c.us', ''),
             body: message.body
-        }, { timeout: 30000 });
+        });
+        const signature = require('crypto').createHmac('sha256', BRIDGE_SECRET).update(payload).digest('hex');
+        const resp = await axios.post(`${AGENT_API_URL}/webhook`, JSON.parse(payload), {
+            timeout: 30000,
+            headers: { 'X-Bridge-Signature': signature, 'Content-Type': 'application/json' }
+        });
         if (resp.data.reply) {
             // Typing indicator
             await client.sendPresenceAvailable();
@@ -163,6 +170,8 @@ async function safeSend(phone, message) {
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
+// Serve generated QR image file if needed
+app.use('/static', express.static(__dirname));
 
 app.post('/send', async (req, res) => {
     const { phone, message } = req.body;
@@ -201,7 +210,12 @@ app.get('/qr', (req, res) => {
             res.json({ qr: latestQR, data_url: null, status: 'ready' });
         });
     } else {
-        res.json({ qr: null, data_url: null, status: 'waiting' });
+        // If a QR image file exists on disk, serve it as fallback
+        if (fs.existsSync(QR_FILE_PATH)) {
+            res.sendFile(QR_FILE_PATH);
+        } else {
+            res.json({ qr: null, data_url: null, status: 'waiting' });
+        }
     }
 });
 
