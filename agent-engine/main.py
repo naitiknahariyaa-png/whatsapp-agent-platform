@@ -1145,6 +1145,38 @@ async def get_theme(theme_id: str):
 
 
 # ---------------------------------------------------------------------------
+# WhatsApp Bridge Connector Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/whatsapp/bridge-qr")
+async def get_bridge_qr():
+    """Get QR code from the WhatsApp bridge"""
+    from whatsapp_connector import whatsapp_connector
+    return whatsapp_connector.get_qr()
+
+
+@app.post("/api/whatsapp/bridge/start")
+async def start_bridge():
+    """Start the WhatsApp bridge automatically"""
+    from whatsapp_connector import whatsapp_connector
+    return whatsapp_connector.start_bridge()
+
+
+@app.post("/api/whatsapp/bridge/stop")
+async def stop_bridge():
+    """Stop the WhatsApp bridge"""
+    from whatsapp_connector import whatsapp_connector
+    return whatsapp_connector.stop_bridge()
+
+
+@app.get("/api/whatsapp/bridge/status")
+async def bridge_status():
+    """Get WhatsApp bridge status"""
+    from whatsapp_connector import whatsapp_connector
+    return whatsapp_connector.get_status()
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

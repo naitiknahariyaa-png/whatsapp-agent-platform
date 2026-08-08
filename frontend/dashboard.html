@@ -1524,58 +1524,101 @@ async function connectWhatsApp() {
   const statusDiv = document.getElementById('waBridgeStatus');
   
   btn.disabled = true;
-  btn.textContent = '🔄 Connecting...';
-  instr.textContent = 'Checking bridge status...';
+  btn.textContent = '🔄 Starting bridge...';
+  instr.textContent = 'Starting WhatsApp bridge...';
   qrContainer.innerHTML = '';
   
   try {
-    // Try to get QR from local bridge
-    const bridgeStatus = await apiFetch('/api/whatsapp/bridge-qr');
+    // Step 1: Try to start the bridge automatically
+    const startResult = await apiFetch('/api/whatsapp/bridge/start', { method: 'POST' });
     
-    if (bridgeStatus.status === 'ready' && bridgeStatus.qr) {
-      // Bridge is running and has QR
-      qrContainer.innerHTML = '<img src="' + bridgeStatus.data_url + '" style="max-width:250px;border-radius:8px" alt="Scan QR"><br><small>Scan with WhatsApp → Linked Devices</small>';
-      instr.textContent = '✅ QR code ready! Scan with your phone.';
-      statusDiv.textContent = 'Bridge QR loaded - waiting for scan...';
-      btn.textContent = '🔄 Refresh QR';
+    if (startResult.status === 'error') {
+      // Bridge can't start - show error with instructions
+      qrContainer.innerHTML = `
+        <div style="padding:20px;text-align:left;background:rgba(255,217,61,0.1);border-radius:12px;border:1px solid rgba(255,217,61,0.3)">
+          <div style="font-size:14px;font-weight:600;margin-bottom:12px;color:var(--warning)">⚠️ ${startResult.message}</div>
+          <div style="font-size:13px;color:var(--text-light);line-height:1.6">
+            <strong style="color:var(--text)">To fix:</strong><br><br>
+            1. Install Node.js from <a href="https://nodejs.org" target="_blank" style="color:var(--primary)">nodejs.org</a><br>
+            2. Open terminal in <code>whatsapp-bridge</code> folder<br>
+            3. Run: <code style="background:var(--surface);padding:2px 6px;border-radius:4px">npm install</code><br>
+            4. Then click "Retry" below
+          </div>
+        </div>
+      `;
+      instr.textContent = 'Bridge could not start';
+      statusDiv.textContent = startResult.message;
+      btn.textContent = '🔄 Retry';
       btn.disabled = false;
-      
-      // Poll for connection
-      startBridgePolling();
-    } else if (bridgeStatus.status === 'waiting') {
-      // Bridge is running but no QR yet
-      qrContainer.innerHTML = '<div style="padding:20px;color:var(--text-light)">⏳ Waiting for QR code...<br><small>Open WhatsApp on your phone first</small></div>';
-      instr.textContent = 'Bridge is running. Please open WhatsApp on your phone.';
-      statusDiv.textContent = 'Bridge connected - waiting for QR';
-      btn.textContent = '🔄 Refresh';
-      btn.disabled = false;
-      
-      // Poll for QR
-      pollForQR();
-    } else {
-      // Bridge not running
-      throw new Error('Bridge not running');
+      return;
     }
+    
+    // Step 2: Bridge started or already running - get QR
+    instr.textContent = 'Bridge started! Getting QR code...';
+    statusDiv.textContent = 'Bridge running - waiting for QR...';
+    
+    // Poll for QR code
+    let attempts = 0;
+    const maxAttempts = 15;
+    
+    const getQR = async () => {
+      attempts++;
+      try {
+        const bridgeStatus = await apiFetch('/api/whatsapp/bridge-qr');
+        
+        if (bridgeStatus.status === 'ready' && bridgeStatus.qr) {
+          // QR is ready!
+          qrContainer.innerHTML = '<img src="' + bridgeStatus.data_url + '" style="max-width:250px;border-radius:8px" alt="Scan QR"><br><small style="color:var(--text-light)">Scan with WhatsApp → Linked Devices</small>';
+          instr.textContent = '✅ QR code ready! Scan with your phone.';
+          statusDiv.textContent = 'Waiting for scan...';
+          btn.textContent = '🔄 Refresh QR';
+          btn.disabled = false;
+          
+          // Poll for connection
+          startBridgePolling();
+          return;
+        } else if (bridgeStatus.status === 'waiting') {
+          // Bridge running but no QR yet
+          qrContainer.innerHTML = '<div style="padding:20px;color:var(--text-light)">⏳ Waiting for QR code...<br><small>Opening WhatsApp Web...</small></div>';
+          instr.textContent = 'Bridge is starting. Please wait...';
+          statusDiv.textContent = 'Generating QR code...';
+          
+          if (attempts < maxAttempts) {
+            setTimeout(getQR, 2000);
+          } else {
+            instr.textContent = 'Timeout. Please refresh and try again.';
+            btn.textContent = '🔄 Retry';
+            btn.disabled = false;
+          }
+          return;
+        }
+      } catch (e) {
+        console.error('QR fetch error:', e);
+      }
+      
+      if (attempts < maxAttempts) {
+        setTimeout(getQR, 2000);
+      } else {
+        instr.textContent = 'Could not get QR. Please try again.';
+        btn.textContent = '🔄 Retry';
+        btn.disabled = false;
+      }
+    };
+    
+    getQR();
+    
   } catch (e) {
-    // Bridge not available - show instructions
+    // API error
     qrContainer.innerHTML = `
       <div style="padding:20px;text-align:left;background:rgba(255,217,61,0.1);border-radius:12px;border:1px solid rgba(255,217,61,0.3)">
-        <div style="font-size:14px;font-weight:600;margin-bottom:12px;color:var(--warning)">⚠️ WhatsApp Bridge Not Running</div>
+        <div style="font-size:14px;font-weight:600;margin-bottom:12px;color:var(--warning)">⚠️ Connection Error</div>
         <div style="font-size:13px;color:var(--text-light);line-height:1.6">
-          <strong style="color:var(--text)">To connect WhatsApp:</strong><br><br>
-          1. Open terminal in <code>whatsapp-bridge</code> folder<br>
-          2. Run: <code style="background:var(--surface);padding:2px 6px;border-radius:4px">node bridge.js</code><br>
-          3. Scan QR code in terminal with your phone<br>
-          4. Bridge will connect automatically<br><br>
-          <strong style="color:var(--text)">Requirements:</strong><br>
-          • Chrome/Chromium browser installed<br>
-          • WhatsApp on your phone<br>
-          • Node.js installed
+          ${e.message || 'Could not connect to bridge'}
         </div>
       </div>
     `;
-    instr.textContent = 'Start the bridge locally to connect WhatsApp';
-    statusDiv.textContent = 'Bridge offline - start with: cd whatsapp-bridge && node bridge.js';
+    instr.textContent = 'Connection failed';
+    statusDiv.textContent = 'Check that the backend is running';
     btn.textContent = '🔄 Retry';
     btn.disabled = false;
   }
