@@ -1692,7 +1692,7 @@ function generateWaQR() {
   const container = document.getElementById('waQRCode');
   const instr = document.getElementById('waQRInstruction');
   instr.textContent = 'Generating QR code...';
-  btn = document.getElementById('waBtn');
+  let btn = document.getElementById('waBtn');
   if (btn) btn.disabled = true;
   // Get business phone - try from profile or localStorage
   let waNumber = localStorage.getItem('wa_phone') || '';

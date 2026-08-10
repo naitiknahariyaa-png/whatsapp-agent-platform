@@ -313,9 +313,10 @@ class AgentOrchestrator:
 
             # Check if human is handling this conversation
             sm = get_state_machine()
-            if sm.is_human_takeover(phone_number):
-                print(f"[i] Human takeover active for {phone_number}")
-                return ""
+            if hasattr(sm, 'is_human_takeover'):
+                if await sm.is_human_takeover(client_id, phone_number):
+                    print(f"[i] Human takeover active for {phone_number}")
+                    return ""
 
             # Detect intent using LLM
             intent_result = await self.intent_detector.detect(message, history_dicts)
@@ -327,8 +328,14 @@ class AgentOrchestrator:
 
             # Update state machine
             sm = get_state_machine()
-            new_state = sm.transition(phone_number, intent, entities)
-            state_prompt = sm.get_state_prompt(phone_number)
+            if hasattr(sm, 'transition'):
+                new_state = await sm.transition(client_id, phone_number, intent, entities)
+            else:
+                new_state = sm.transition(phone_number, intent, entities)
+            if hasattr(sm, 'get_state_prompt'):
+                state_prompt = await sm.get_state_prompt(client_id, phone_number)
+            else:
+                state_prompt = sm.get_state_prompt(phone_number)
             print(f"[i] State: {new_state['state']}")
 
             # Trigger handoff if confidence is low or user explicitly asks
@@ -404,6 +411,20 @@ class AgentOrchestrator:
 
             # Save outgoing message
             await save_message(session, phone_number, response, direction="outgoing")
+
+            # 1.1 Persist conversation session to DB (slot data, state, entities)
+            try:
+                sm = get_state_machine()
+                if hasattr(sm, 'set_state'):
+                    await sm.set_state(
+                        client_id, phone_number,
+                        state=new_state.get("state", "browsing") if isinstance(new_state, dict) else "browsing",
+                        intent=intent,
+                        entities=entities,
+                        slot_data=entities,
+                    )
+            except Exception as e:
+                print(f"[!] Session save failed: {e}")
 
             return response
 

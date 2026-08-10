@@ -6,7 +6,7 @@ import sys
 import uuid
 import hmac
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import Optional, List
 
@@ -29,7 +29,7 @@ if _SERVICES_DIR not in sys.path:
             sys.path.insert(0, _alt)
             print(f"[i] Trying alt path: {_alt}", flush=True)
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
@@ -68,6 +68,68 @@ from security import (
 payment_engine = PaymentEngine()
 
 logger = get_logger("main")
+
+# ---------------------------------------------------------------------------
+# WhatsApp helpers (status updates + Meta Cloud API sending)
+# ---------------------------------------------------------------------------
+
+async def _update_message_status(wamid: str, status_type: str, recipient: str):
+    """Update message status in DB when Meta/bridge sends status webhooks."""
+    if not wamid or not status_type:
+        return
+    try:
+        async for session in get_session():
+            from sqlalchemy import select
+            result = await session.execute(
+                select(Message).where(Message.media_url == wamid).limit(1)
+            )
+            msg = result.scalar_one_or_none()
+            if msg:
+                msg.status = status_type
+                await session.commit()
+                logger.info(f"[v] Message {wamid} status updated to {status_type}")
+    except Exception as e:
+        logger.warning(f"Failed to update message status: {e}")
+
+
+async def _send_via_meta(phone_number: str, text: str, client_id: int = 1) -> dict:
+    """Send a WhatsApp message via Meta Cloud API (official Business API)."""
+    access_token = ""
+    phone_number_id = ""
+    try:
+        async for session in get_session():
+            from sqlalchemy import select
+            from business_profiles import business_manager
+            for p in business_manager.profiles.values():
+                if p.client_id == client_id:
+                    access_token = getattr(p, 'meta_access_token', '') or ''
+                    phone_number_id = getattr(p, 'meta_phone_number_id', '') or ''
+                    break
+    except Exception:
+        pass
+
+    if not access_token or not phone_number_id:
+        return {"status": "error", "message": "Meta WhatsApp not connected"}
+
+    url = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone_number,
+        "type": "text",
+        "text": {"body": text},
+    }
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(url, json=payload, headers=headers)
+        if resp.status_code == 200:
+            data = resp.json()
+            wamid = data.get("messages", [{}])[0].get("id", "")
+            return {"status": "sent", "wamid": wamid}
+        return {"status": "error", "message": resp.text, "code": resp.status_code}
+
 
 # ---------------------------------------------------------------------------
 # App initialization
@@ -177,7 +239,7 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
 
 @app.get("/sitemap.xml")
 async def sitemap():
@@ -202,6 +264,49 @@ async def stats():
         "version": "1.0.0",
         "uptime": "running"
     }
+
+
+class ConnectionManager:
+    """1.7 Real-time WebSocket notifications for owner dashboard."""
+
+    def __init__(self):
+        self.active_connections: Dict[int, List[WebSocket]] = {}
+
+    async def connect(self, client_id: int, websocket: WebSocket):
+        await websocket.accept()
+        if client_id not in self.active_connections:
+            self.active_connections[client_id] = []
+        self.active_connections[client_id].append(websocket)
+
+    def disconnect(self, client_id: int, websocket: WebSocket):
+        if client_id in self.active_connections:
+            self.active_connections[client_id].remove(websocket)
+            if not self.active_connections[client_id]:
+                del self.active_connections[client_id]
+
+    async def broadcast(self, client_id: int, payload: dict):
+        if client_id in self.active_connections:
+            dead = []
+            for ws in self.active_connections[client_id]:
+                try:
+                    await ws.send_json(payload)
+                except Exception:
+                    dead.append(ws)
+            for ws in dead:
+                self.disconnect(client_id, ws)
+
+
+manager = ConnectionManager()
+
+
+@app.websocket("/ws/notifications/{client_id}")
+async def websocket_notifications(websocket: WebSocket, client_id: int):
+    await manager.connect(client_id, websocket)
+    try:
+        while True:
+            data = await websocket.receive_json()
+    except WebSocketDisconnect:
+        manager.disconnect(client_id, websocket)
 
 @app.post("/api/message", response_model=MessageResponse)
 async def handle_message(req: MessageRequest, request: Request):
@@ -233,7 +338,7 @@ async def meta_webhook_verify(request: Request):
 
 @app.post("/webhook")
 async def webhook(request: Request):
-    """WhatsApp webhook — verifies bridge signature, rate-limits, sanitizes input."""
+    """WhatsApp webhook — handles messages + status updates (sent/delivered/read/failed)."""
     body = await request.body()
     signature = request.headers.get("X-Bridge-Signature") or request.headers.get("X-Hub-Signature-256")
     if not verify_bridge_webhook(body, signature):
@@ -243,16 +348,48 @@ async def webhook(request: Request):
     data = await request.json()
     logger.info(f"Webhook received: {data}")
 
+    # 1.3 Status updates from Meta Cloud API or bridge
+    entry = data.get("entry") or []
+    for e in entry:
+        changes = e.get("changes") or []
+        for change in changes:
+            value = change.get("value") or {}
+            statuses = value.get("statuses") or []
+            for status in statuses:
+                wamid = status.get("id", "")
+                status_type = status.get("status", "")
+                recipient = status.get("recipient_id", "") or status.get("to", "")
+                await _update_message_status(wamid, status_type, recipient)
+
+    # Existing message handling
     phone_number = sanitize_phone(data.get("from") or data.get("phone_number", ""))
     message = sanitize_text(data.get("body") or data.get("text") or data.get("message", ""))
     client_id = data.get("client_id") or 1
 
+    reply = None
     if phone_number and message:
         orchestrator: AgentOrchestrator = app.state.orchestrator
         reply = await orchestrator.process_message(phone_number, message, client_id)
+        # 1.7 Push real-time notification to owner dashboard
+        try:
+            await manager.broadcast(client_id, {
+                "type": "new_message",
+                "phone_number": phone_number,
+                "message": message,
+                "reply": reply,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            pass
         return {"status": "ok", "reply": reply}
 
     return {"status": "ok", "message": "webhook received"}
+
+
+@app.post("/api/webhook")
+async def api_webhook(request: Request):
+    """Alias for /webhook so the bridge can POST to /api/webhook."""
+    return await webhook(request)
 
 @app.post("/signup")
 async def signup(req: SignupRequest):
@@ -1005,21 +1142,36 @@ async def create_business_profile(request: Request, user: Optional[User] = Depen
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid business type")
 
+    errors = {}
+    name = (body.get("name") or "").strip()
+    if not name:
+        errors["name"] = "Business name is required"
+    if len(name) < 2:
+        errors["name"] = "Business name must be at least 2 characters"
+    contact_phone = (body.get("contact_phone") or "").strip()
+    if contact_phone and not all(ch.isdigit() or ch == '+' for ch in contact_phone):
+        errors["contact_phone"] = "Phone number must contain only digits and +"
+    contact_email = (body.get("contact_email") or "").strip()
+    if contact_email and "@" not in contact_email:
+        errors["contact_email"] = "Invalid email address"
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+
     template = BusinessTemplate.get_template(bt)
     profile = BusinessProfile(
         id=str(uuid.uuid4())[:8],
         client_id=body.get("client_id", 1),
         owner_id=body.get("owner_id", "admin"),
         business_type=bt,
-        name=body.get("name", "My Business"),
+        name=name,
         description=body.get("description", ""),
         logo_url=body.get("logo_url", ""),
         primary_color=body.get("primary_color", "#25D366"),
         secondary_color=body.get("secondary_color", "#128C7E"),
         welcome_message=body.get("welcome_message", template["welcome"]),
         working_hours=body.get("working_hours", {}),
-        contact_phone=body.get("contact_phone", ""),
-        contact_email=body.get("contact_email", ""),
+        contact_phone=contact_phone,
+        contact_email=contact_email,
         address=body.get("address", ""),
         website=body.get("website", ""),
         payment_methods=body.get("payment_methods", ["cash", "upi"]),
@@ -1054,6 +1206,25 @@ async def update_business_profile(business_id: str, request: Request, user: User
         raise HTTPException(status_code=404, detail="Business not found")
     if user.role != Role.ADMIN.value and profile.client_id != (user.client_id or user.id):
         raise HTTPException(status_code=403, detail="Access denied")
+
+    errors = {}
+    if "name" in body:
+        name = (body.get("name") or "").strip()
+        if not name:
+            errors["name"] = "Business name is required"
+        elif len(name) < 2:
+            errors["name"] = "Business name must be at least 2 characters"
+    if "contact_phone" in body:
+        phone = (body.get("contact_phone") or "").strip()
+        if phone and not all(ch.isdigit() or ch == '+' for ch in phone):
+            errors["contact_phone"] = "Phone number must contain only digits and +"
+    if "contact_email" in body:
+        email = (body.get("contact_email") or "").strip()
+        if email and "@" not in email:
+            errors["contact_email"] = "Invalid email address"
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+
     profile = business_manager.update_profile(business_id, **body)
     return {"status": "updated", "business": profile.to_dict()}
 
@@ -1733,6 +1904,308 @@ async def _campaign_message_sender(channel: str, contact_id: str, content: str) 
     except Exception as e:
         logger.error(f"[CAMPAIGN] Error sending to {phone}: {e}")
         return False
+
+
+# ---------------------------------------------------------------------------
+# Module A — CRM (1.1 persistent contacts, pipeline, custom fields, VIP)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/crm/contacts")
+async def crm_list_contacts(client_id: int = 1, user: User = Depends(get_current_user)):
+    """List all contacts for a business with pipeline and VIP info."""
+    async for session in get_session():
+        from sqlalchemy import select
+        from db import Contact
+        result = await session.execute(
+            select(Contact).where(Contact.client_id == client_id).order_by(Contact.updated_at.desc())
+        )
+        contacts = result.scalars().all()
+        return {
+            "contacts": [
+                {
+                    "id": c.id,
+                    "phone_number": c.phone_number,
+                    "name": c.name,
+                    "email": c.email,
+                    "tags": c.tags or [],
+                    "lead_score": c.lead_score,
+                    "lead_status": c.lead_status,
+                    "source": c.source,
+                    "custom_fields": c.custom_fields or {},
+                    "is_vip": c.lead_score >= 80,
+                    "created_at": c.created_at.isoformat(),
+                    "updated_at": c.updated_at.isoformat(),
+                }
+                for c in contacts
+            ]
+        }
+
+
+@app.put("/api/crm/contacts/{contact_id}/pipeline")
+async def crm_update_pipeline(contact_id: int, request: Request, user: User = Depends(get_current_user)):
+    """Update contact pipeline stage and tags."""
+    body = await request.json()
+    async for session in get_session():
+        from sqlalchemy import select
+        result = await session.execute(select(Contact).where(Contact.id == contact_id))
+        contact = result.scalar_one_or_none()
+        if not contact:
+            raise HTTPException(status_code=404, detail="Contact not found")
+        if "lead_status" in body:
+            contact.lead_status = body["lead_status"]
+        if "tags" in body:
+            contact.tags = body["tags"]
+        if "lead_score" in body:
+            contact.lead_score = body["lead_score"]
+        if "custom_fields" in body:
+            contact.custom_fields = body["custom_fields"]
+        contact.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        await session.refresh(contact)
+        return {
+            "id": contact.id,
+            "lead_status": contact.lead_status,
+            "tags": contact.tags,
+            "lead_score": contact.lead_score,
+            "custom_fields": contact.custom_fields,
+        }
+
+
+@app.post("/api/crm/contacts/{contact_id}/note")
+async def crm_add_note(contact_id: int, request: Request, user: User = Depends(get_current_user)):
+    """Append a note to a contact."""
+    body = await request.json()
+    note = (body.get("note") or "").strip()
+    if not note:
+        raise HTTPException(status_code=400, detail="note is required")
+    async for session in get_session():
+        from sqlalchemy import select
+        result = await session.execute(select(Contact).where(Contact.id == contact_id))
+        contact = result.scalar_one_or_none()
+        if not contact:
+            raise HTTPException(status_code=404, detail="Contact not found")
+        existing = contact.notes or ""
+        contact.notes = f"{existing}\n[{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}] {note}".strip()
+        contact.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        return {"status": "saved", "note": contact.notes}
+
+
+# ---------------------------------------------------------------------------
+# Module B — Appointment System (calendar, reminders)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/appointments")
+async def list_appointments(client_id: int = 1, date: str = "", user: User = Depends(get_current_user)):
+    """List appointments for a business, optionally filtered by date."""
+    async for session in get_session():
+        from sqlalchemy import select
+        from db import Appointment
+        query = select(Appointment).where(Appointment.client_id == client_id)
+        if date:
+            query = query.where(Appointment.appointment_date == date)
+        result = await session.execute(query.order_by(Appointment.appointment_date, Appointment.appointment_time))
+        appts = result.scalars().all()
+        return {
+            "appointments": [
+                {
+                    "id": a.id,
+                    "phone_number": a.phone_number,
+                    "contact_id": a.contact_id,
+                    "title": a.title,
+                    "description": a.description,
+                    "appointment_date": a.appointment_date,
+                    "appointment_time": a.appointment_time,
+                    "duration_minutes": a.duration_minutes,
+                    "status": a.status,
+                    "created_at": a.created_at.isoformat(),
+                }
+                for a in appts
+            ]
+        }
+
+
+@app.post("/api/appointments")
+async def create_appointment(request: Request, user: User = Depends(get_current_user)):
+    """Create an appointment (used by AI slot-filling flow)."""
+    body = await request.json()
+    required = ["phone_number", "appointment_date", "appointment_time"]
+    missing = [f for f in required if not body.get(f)]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Missing required fields: {', '.join(missing)}")
+    async for session in get_session():
+        from sqlalchemy import select
+        from db import Appointment
+        cid = _get_my_client_id(user)
+        appt = Appointment(
+            client_id=cid,
+            phone_number=body["phone_number"],
+            contact_id=body.get("contact_id"),
+            title=body.get("title", "Appointment"),
+            description=body.get("description", ""),
+            appointment_date=body["appointment_date"],
+            appointment_time=body["appointment_time"],
+            duration_minutes=body.get("duration_minutes", 30),
+            status=body.get("status", "scheduled"),
+        )
+        session.add(appt)
+        await session.commit()
+        await session.refresh(appt)
+        try:
+            await manager.broadcast(cid, {
+                "type": "appointment_created",
+                "appointment_id": appt.id,
+                "phone_number": appt.phone_number,
+                "appointment_date": appt.appointment_date,
+                "appointment_time": appt.appointment_time,
+            })
+        except Exception:
+            pass
+        return {
+            "id": appt.id,
+            "status": appt.status,
+            "appointment_date": appt.appointment_date,
+            "appointment_time": appt.appointment_time,
+        }
+
+
+@app.put("/api/appointments/{appointment_id}/status")
+async def update_appointment_status(appointment_id: int, request: Request, user: User = Depends(get_current_user)):
+    """Update appointment status (confirmed/completed/cancelled)."""
+    body = await request.json()
+    new_status = body.get("status", "")
+    if not new_status:
+        raise HTTPException(status_code=400, detail="status is required")
+    async for session in get_session():
+        from sqlalchemy import select
+        from db import Appointment
+        result = await session.execute(select(Appointment).where(Appointment.id == appointment_id))
+        appt = result.scalar_one_or_none()
+        if not appt:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+        appt.status = new_status
+        appt.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        await session.refresh(appt)
+        cid = _get_my_client_id(user)
+        try:
+            await manager.broadcast(cid, {
+                "type": "appointment_updated",
+                "appointment_id": appt.id,
+                "status": appt.status,
+            })
+        except Exception:
+            pass
+        return {"status": appt.status}
+
+
+# ---------------------------------------------------------------------------
+# Module D — Analytics Dashboard (revenue, funnels, response times, tips)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/analytics/overview")
+async def analytics_overview(client_id: int = 1, user: User = Depends(get_current_user)):
+    """Get analytics overview for a business."""
+    async for session in get_session():
+        from sqlalchemy import select, func
+        from db import Message, Appointment, Contact, ConversationSession
+        total_messages = (await session.execute(
+            select(func.count()).select_from(Message).where(Message.client_id == client_id)
+        )).scalar() or 0
+
+        total_appointments = (await session.execute(
+            select(func.count()).select_from(Appointment).where(Appointment.client_id == client_id)
+        )).scalar() or 0
+
+        total_contacts = (await session.execute(
+            select(func.count()).select_from(Contact).where(Contact.client_id == client_id)
+        )).scalar() or 0
+
+        conversion_rate = round((total_appointments / total_contacts * 100), 1) if total_contacts else 0
+
+        avg_lead_score = (await session.execute(
+            select(func.avg(Contact.lead_score)).where(Contact.client_id == client_id)
+        )).scalar() or 0
+
+        sessions_result = await session.execute(
+            select(ConversationSession).where(ConversationSession.client_id == client_id)
+        )
+        sessions = sessions_result.scalars().all()
+        intent_counts = {}
+        for s in sessions:
+            if s.intent:
+                intent_counts[s.intent] = intent_counts.get(s.intent, 0) + 1
+
+        tips = []
+        if conversion_rate < 20 and total_contacts > 10:
+            tips.append("Only {:.1f}% of contacts convert to appointments — consider improving your welcome message.".format(conversion_rate))
+        if avg_lead_score < 30:
+            tips.append("Average lead score is low — add more qualification questions to identify hot leads.")
+        if total_messages > 100 and total_contacts < 20:
+            tips.append("You have many repeat messages from few contacts — consider segmenting VIP customers.")
+        if not tips:
+            tips.append("Your metrics look healthy. Keep monitoring response times.")
+
+        return {
+            "total_messages": total_messages,
+            "total_appointments": total_appointments,
+            "total_contacts": total_contacts,
+            "conversion_rate": conversion_rate,
+            "avg_lead_score": round(float(avg_lead_score), 1),
+            "intent_breakdown": intent_counts,
+            "tips": tips,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Module E — Re-engagement Campaigns (win-back automation)
+# ---------------------------------------------------------------------------
+
+@app.post("/api/campaigns/winback/run")
+async def run_winback_campaign(request: Request, user: User = Depends(get_current_user)):
+    """Detect inactive contacts and launch a win-back campaign."""
+    body = await request.json()
+    inactive_days = int(body.get("inactive_days", 21))
+    template_name = body.get("template_name", "winback_10_off")
+    cid = _get_my_client_id(user)
+
+    async for session in get_session():
+        from sqlalchemy import select, func
+        from datetime import timedelta
+        from db import Contact
+        cutoff = datetime.now(timezone.utc) - timedelta(days=inactive_days)
+        result = await session.execute(
+            select(Contact).where(
+                Contact.client_id == cid,
+                Contact.updated_at < cutoff,
+                Contact.lead_status != "inactive",
+            )
+        )
+        inactive = result.scalars().all()
+        if not inactive:
+            return {"status": "no_targets", "message": f"No contacts inactive for {inactive_days}+ days"}
+
+        segment_name = f"inactive_{inactive_days}d_{datetime.now(timezone.utc).strftime('%Y%m%d')}"
+        from broadcast import broadcast_engine
+        try:
+            list_result = await broadcast_engine.create_list(
+                segment_name,
+                [c.phone_number for c in inactive],
+                description=f"Auto-winback: {inactive_days}+ days inactive",
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to create segment: {e}")
+
+        campaign_result = await broadcast_engine.send_campaign(
+            segment_name,
+            f"Hi! We miss you. Here is 10% off your next order. Reply to book!"
+        )
+        return {
+            "status": "launched",
+            "segment": segment_name,
+            "targets": len(inactive),
+            "campaign": campaign_result,
+        }
 
 
 # ---------------------------------------------------------------------------

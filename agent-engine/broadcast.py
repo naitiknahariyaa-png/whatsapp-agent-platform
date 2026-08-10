@@ -150,7 +150,7 @@ class BroadcastEngine:
                     personalized = await self._personalize_message(phone, template)
                     
                     resp = await client.post(f"{self.bridge_url}/send", json={
-                        "phone": phone, "message": personalized
+                        "to": phone, "message": personalized
                     })
                     if resp.status_code == 200:
                         sent += 1

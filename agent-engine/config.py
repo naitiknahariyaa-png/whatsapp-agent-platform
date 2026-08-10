@@ -1,8 +1,11 @@
 import os
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    model_config = ConfigDict(env_file=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+
     groq_api_key: str = ""
     llm_model: str = "llama-3.3-70b-versatile"
     llm_provider: str = "groq"
@@ -15,7 +18,6 @@ class Settings(BaseSettings):
     broadcast_rate_per_sec: float = 1.0
     agent_api_url: str = "http://localhost:8000"
     wa_bridge_secret: str = ""
-    # Meta WhatsApp Cloud API (official)
     meta_access_token: str = ""
     meta_phone_number_id: str = ""
     meta_verify_token: str = ""
@@ -27,9 +29,6 @@ class Settings(BaseSettings):
     jwt_secret_key: str = ""
     host: str = "0.0.0.0"
     port: int = 8000
-
-    class Config:
-        env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 
 
 settings = Settings()

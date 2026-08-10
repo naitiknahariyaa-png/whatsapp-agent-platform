@@ -101,13 +101,17 @@ function initClient() {
     if (msg.fromMe) return;
     try {
       const contact = await msg.getContact();
-      forwardToAgent('message', {
+      const result = await forwardToAgent('message', {
         from: msg.from,
         from_name: contact ? contact.pushname || contact.name || '' : '',
         body: msg.body,
         timestamp: msg.timestamp,
         hasMedia: msg.hasMedia,
       });
+      if (result && result.reply) {
+        const chatId = msg.from.includes('@') ? msg.from : msg.from + '@c.us';
+        await client.sendMessage(chatId, result.reply);
+      }
     } catch (e) { console.error('Message error:', e.message); }
   });
   client.on('disconnected', (reason) => {
@@ -157,6 +161,14 @@ app.post('/send', async (req, res) => {
 
 app.get('/status', (req, res) => {
   res.json({ connected: isConnected, connection_state: connectionState, whatsapp: whatsappInfo || {} });
+});
+
+app.post('/connect/request-code', (req, res) => {
+  res.json({ status: 'qr_required', message: 'WhatsApp Web uses QR code authentication. Scan the QR code from /qr to connect.', qr: currentQR, data_url: currentQRDataUrl });
+});
+
+app.post('/connect/verify', (req, res) => {
+  res.json({ status: 'qr_required', message: 'WhatsApp Web uses QR code authentication. Scan the QR code to connect.' });
 });
 
 app.post('/broadcast', async (req, res) => {

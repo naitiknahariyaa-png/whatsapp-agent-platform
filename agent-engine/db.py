@@ -103,6 +103,26 @@ class Appointment(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class ConversationSession(Base):
+    """Persistent conversation session for slot-filling and context."""
+    __tablename__ = "conversation_sessions"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True)
+    phone_number: Mapped[str] = mapped_column(String(20), index=True)
+    session_state: Mapped[str] = mapped_column(String(50), default="browsing")
+    intent: Mapped[Optional[str]] = mapped_column(String(50))
+    entities: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    slot_data: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    context: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    last_user_message: Mapped[Optional[str]] = mapped_column(Text)
+    last_bot_message: Mapped[Optional[str]] = mapped_column(Text)
+    message_count: Mapped[int] = mapped_column(Integer, default=0)
+    is_human_takeover: Mapped[bool] = mapped_column(default=False)
+    last_activity_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 async def get_session():
     async with async_session() as session:
         yield session
@@ -202,3 +222,70 @@ async def get_client_usage(session, client_id: int):
         "total_appointments": appt_count.scalar(),
         "total_contacts": contact_count.scalar()
     }
+
+
+# -- Conversation session helpers (1.1 persistent memory, 1.5 isolation) --
+
+async def get_or_create_session(session, client_id: int, phone_number: str, ttl_hours: int = 48) -> "ConversationSession":
+    """Load existing session or create a fresh one. Returns the session row."""
+    result = await session.execute(
+        select(ConversationSession).where(
+            ConversationSession.client_id == client_id,
+            ConversationSession.phone_number == phone_number,
+            ConversationSession.is_human_takeover == False,
+        ).order_by(ConversationSession.last_activity_at.desc()).limit(1)
+    )
+    conv_session = result.scalar_one_or_none()
+    if not conv_session:
+        conv_session = ConversationSession(client_id=client_id, phone_number=phone_number)
+        session.add(conv_session)
+        await session.flush()
+        return conv_session
+
+    # Auto-reset if idle beyond TTL (1.5)
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    idle = now - conv_session.last_activity_at
+    if idle > timedelta(hours=ttl_hours):
+        conv_session.session_state = "browsing"
+        conv_session.intent = None
+        conv_session.entities = {}
+        conv_session.slot_data = {}
+        conv_session.context = {}
+        conv_session.last_user_message = None
+        conv_session.last_bot_message = None
+        conv_session.message_count = 0
+        conv_session.is_human_takeover = False
+        conv_session.updated_at = now
+
+    conv_session.last_activity_at = now
+    await session.commit()
+    await session.refresh(conv_session)
+    return conv_session
+
+
+async def update_session_after_message(session, client_id: int, phone_number: str, user_message: str, bot_message: str, intent: str, entities: dict, slot_data: dict, new_state: str):
+    """Append a turn to the conversation session."""
+    result = await session.execute(
+        select(ConversationSession).where(
+            ConversationSession.client_id == client_id,
+            ConversationSession.phone_number == phone_number,
+        ).order_by(ConversationSession.last_activity_at.desc()).limit(1)
+    )
+    conv_session = result.scalar_one_or_none()
+    if not conv_session:
+        conv_session = ConversationSession(client_id=client_id, phone_number=phone_number)
+        session.add(conv_session)
+
+    conv_session.last_user_message = user_message
+    conv_session.last_bot_message = bot_message
+    conv_session.intent = intent
+    conv_session.entities = entities
+    conv_session.slot_data = slot_data
+    conv_session.session_state = new_state
+    conv_session.message_count = (conv_session.message_count or 0) + 1
+    conv_session.last_activity_at = datetime.now(timezone.utc)
+    conv_session.updated_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(conv_session)
+    return conv_session
