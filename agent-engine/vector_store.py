@@ -136,9 +136,9 @@ def add_knowledge_item(client_id: int, title: str, content: str, category: str =
     return add_documents(client_id, documents, metadatas)
 
 
-def search_knowledge(client_id: int, query: str, category: str = None) -> List[Dict]:
+def search_knowledge(client_id: int, query: str, category: str = None, n_results: int = 5) -> List[Dict]:
     """Search knowledge base with optional category filter."""
-    results = search_documents(client_id, query, n_results=5)
+    results = search_documents(client_id, query, n_results=n_results)
     
     if category and results:
         filtered = [r for r in results if r.get("metadata", {}).get("category") == category]

@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     chroma_host: str = "localhost"
     chroma_port: int = 8001
     whatsapp_bridge_url: str = "http://localhost:3001"
+    broadcast_rate_per_sec: float = 1.0
+    agent_api_url: str = "http://localhost:8000"
+    wa_bridge_secret: str = ""
     # Meta WhatsApp Cloud API (official)
     meta_access_token: str = ""
     meta_phone_number_id: str = ""
@@ -35,3 +38,6 @@ os.environ.setdefault("GROQ_API_KEY", settings.groq_api_key)
 os.environ.setdefault("LLM_PROVIDER", settings.llm_provider)
 os.environ.setdefault("LLM_MODEL", settings.llm_model)
 os.environ.setdefault("DATABASE_URL", settings.database_url)
+os.environ.setdefault("WA_BRIDGE_SECRET", settings.wa_bridge_secret)
+os.environ.setdefault("WHATSAPP_BRIDGE_URL", settings.whatsapp_bridge_url)
+os.environ.setdefault("AGENT_API_URL", settings.agent_api_url)

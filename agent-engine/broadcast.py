@@ -203,3 +203,12 @@ class BroadcastEngine:
                 .values(**kwargs)
             )
             await session.commit()
+
+
+# Global broadcast engine instance (uses bridge URL from settings)
+from config import settings as _settings
+
+broadcast_engine = BroadcastEngine(
+    bridge_url=_settings.whatsapp_bridge_url,
+    rate_per_sec=float(_settings.broadcast_rate_per_sec),
+)

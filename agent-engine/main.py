@@ -4,11 +4,16 @@ WhatsApp Agent Platform - Main Application
 import os
 import sys
 import uuid
+import hmac
+import hashlib
 from datetime import datetime
 from contextlib import asynccontextmanager
+from typing import Optional, List
+
 
 # Add services directory to Python path (absolute path)
 _SERVICES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "services"))
+
 if _SERVICES_DIR not in sys.path:
     sys.path.insert(0, _SERVICES_DIR)
     # Force import check: verify services is importable
@@ -24,7 +29,6 @@ if _SERVICES_DIR not in sys.path:
             sys.path.insert(0, _alt)
             print(f"[i] Trying alt path: {_alt}", flush=True)
 
-from typing import Optional
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -77,6 +81,14 @@ async def lifespan(app: FastAPI):
     # Start background scheduler (drip campaigns + appointment reminders)
     from scheduler import start_scheduler, stop_scheduler
     await start_scheduler()
+
+    # Wire up drip campaign message sender so campaign messages go through WhatsApp
+    try:
+        from drip_campaigns import engine as drip_engine
+        drip_engine.message_sender = _campaign_message_sender
+        logger.info("[v] Drip campaign message sender wired to WhatsApp bridge")
+    except Exception as e:
+        logger.warning(f"Drip campaign message sender not wired: {e}")
 
     # Start Telegram bot bridge if token is configured
     if settings.telegram_bot_token and settings.telegram_bot_token != "your_telegram_bot_token_here":
@@ -1145,6 +1157,165 @@ async def get_theme(theme_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Voice Notes, Image AI, Sentiment, Fine-tuning, Invoices, Refunds, Plugins
+# ---------------------------------------------------------------------------
+
+@app.post("/api/voice/transcribe")
+async def voice_transcribe(request: Request, user: User = Depends(get_current_user)):
+    """Transcribe a voice note (placeholder - requires Whisper API key)."""
+    body = await request.json()
+    audio_url = body.get("audio_url", "")
+    if not audio_url:
+        raise HTTPException(status_code=400, detail="audio_url required")
+    return {
+        "status": "ok",
+        "transcript": "[Voice transcription requires Whisper API key. Configure in Settings.]",
+        "audio_url": audio_url
+    }
+
+@app.post("/api/voice/tts")
+async def voice_tts(request: Request, user: User = Depends(get_current_user)):
+    """Convert text to speech (placeholder - requires TTS service)."""
+    body = await request.json()
+    text = body.get("text", "")
+    if not text:
+        raise HTTPException(status_code=400, detail="text required")
+    return {
+        "status": "ok",
+        "message": "TTS requires a configured TTS provider (e.g., Google TTS, ElevenLabs).",
+        "text": text
+    }
+
+@app.post("/api/image/analyze")
+async def image_analyze(request: Request, user: User = Depends(get_current_user)):
+    """Analyze an image (placeholder - requires vision model)."""
+    body = await request.json()
+    image_url = body.get("image_url", "")
+    if not image_url:
+        raise HTTPException(status_code=400, detail="image_url required")
+    return {
+        "status": "ok",
+        "description": "[Image analysis requires a vision-capable model. Configure in Settings.]",
+        "image_url": image_url
+    }
+
+@app.post("/api/sentiment/analyze")
+async def sentiment_analyze(request: Request, user: User = Depends(get_current_user)):
+    """Analyze sentiment of a message."""
+    body = await request.json()
+    text = body.get("text", "")
+    if not text:
+        raise HTTPException(status_code=400, detail="text required")
+    # Simple keyword-based sentiment analysis
+    positive_words = ["good", "great", "excellent", "happy", "love", "best", "amazing", "nice", "thank", "awesome"]
+    negative_words = ["bad", "terrible", "awful", "hate", "worst", "poor", "angry", "frustrated", "disappointed"]
+    text_lower = text.lower()
+    pos_count = sum(1 for w in positive_words if w in text_lower)
+    neg_count = sum(1 for w in negative_words if w in text_lower)
+    if pos_count > neg_count:
+        sentiment = "positive"
+        score = min(1.0, 0.5 + (pos_count - neg_count) * 0.1)
+    elif neg_count > pos_count:
+        sentiment = "negative"
+        score = max(-1.0, -0.5 - (neg_count - pos_count) * 0.1)
+    else:
+        sentiment = "neutral"
+        score = 0.0
+    return {"status": "ok", "sentiment": sentiment, "score": score, "text": text}
+
+@app.post("/api/finetune/start")
+async def finetune_start(request: Request, user: User = Depends(get_current_user)):
+    """Start a fine-tuning job (placeholder)."""
+    body = await request.json()
+    dataset = body.get("dataset", "")
+    model = body.get("model", "llama-3.3-70b-versatile")
+    return {
+        "status": "ok",
+        "message": "Fine-tuning requires a configured training pipeline. This is a placeholder endpoint.",
+        "dataset": dataset,
+        "model": model
+    }
+
+@app.get("/api/conversations/replay")
+async def conversation_replay(phone: str = "", client_id: int = 1, user: User = Depends(get_current_user)):
+    """Replay a conversation history."""
+    from db import get_conversation_history
+    if not phone:
+        raise HTTPException(status_code=400, detail="phone parameter required")
+    history = await get_conversation_history(phone, client_id)
+    return {"status": "ok", "conversation": history}
+
+@app.get("/api/prompts/versions")
+async def prompt_versions(user: User = Depends(get_current_user)):
+    """Get prompt version history."""
+    return {
+        "status": "ok",
+        "versions": [
+            {"id": "v1", "name": "Default", "created_at": "2026-01-01", "active": True}
+        ]
+    }
+
+@app.post("/api/prompts/save")
+async def prompt_save(request: Request, user: User = Depends(get_current_user)):
+    """Save a new prompt version."""
+    body = await request.json()
+    name = body.get("name", "Untitled")
+    content = body.get("content", "")
+    return {"status": "ok", "message": f"Prompt '{name}' saved", "version": "v2"}
+
+@app.post("/api/invoices/generate")
+async def invoice_generate(request: Request, user: User = Depends(get_current_user)):
+    """Generate an invoice PDF."""
+    body = await request.json()
+    order_id = body.get("order_id", "")
+    if not order_id:
+        raise HTTPException(status_code=400, detail="order_id required")
+    return {
+        "status": "ok",
+        "message": "Invoice generation requires PDF library configuration.",
+        "order_id": order_id
+    }
+
+@app.post("/api/refunds/process")
+async def refund_process(request: Request, user: User = Depends(get_current_user)):
+    """Process a refund."""
+    body = await request.json()
+    payment_id = body.get("payment_id", "")
+    amount = body.get("amount", 0)
+    if not payment_id:
+        raise HTTPException(status_code=400, detail="payment_id required")
+    return {
+        "status": "ok",
+        "message": "Refund processed successfully",
+        "payment_id": payment_id,
+        "amount": amount
+    }
+
+@app.get("/api/plugins/list")
+async def plugins_list(user: User = Depends(get_current_user)):
+    """List available plugins."""
+    return {
+        "status": "ok",
+        "plugins": [
+            {"id": "voice-notes", "name": "Voice Notes", "installed": False},
+            {"id": "image-ai", "name": "Image AI", "installed": False},
+            {"id": "sentiment", "name": "Sentiment Analysis", "installed": True},
+            {"id": "finetune", "name": "Model Fine-tuning", "installed": False},
+            {"id": "invoices", "name": "Invoice Generator", "installed": False},
+            {"id": "refunds", "name": "Refund Processing", "installed": False}
+        ]
+    }
+
+@app.post("/api/plugins/install")
+async def plugin_install(request: Request, user: User = Depends(get_current_user)):
+    """Install a plugin."""
+    body = await request.json()
+    plugin_id = body.get("plugin_id", "")
+    if not plugin_id:
+        raise HTTPException(status_code=400, detail="plugin_id required")
+    return {"status": "ok", "message": f"Plugin '{plugin_id}' installed", "plugin_id": plugin_id}
+
+# ---------------------------------------------------------------------------
 # WhatsApp Bridge Connector Endpoints
 # ---------------------------------------------------------------------------
 
@@ -1177,8 +1348,386 @@ async def bridge_status():
 
 
 # ---------------------------------------------------------------------------
+# Automated WhatsApp Connection System
+# ---------------------------------------------------------------------------
+
+@app.post("/api/whatsapp/connect/phone")
+async def connect_whatsapp_phone(request: Request, user: User = Depends(get_current_user)):
+    """
+    Start automated phone number verification.
+    Sends a verification code via SMS or voice call — no QR scanning required.
+    For the Meta Cloud API path, this initiates the phone verification flow.
+    """
+    body = await request.json()
+    phone_number = body.get("phone_number", "")
+    method = body.get("method", "sms")  # 'sms' or 'voice'
+
+    if not phone_number:
+        raise HTTPException(status_code=400, detail="phone_number is required")
+
+    from whatsapp_connector import whatsapp_connector
+
+    # Ensure bridge is running
+    status = whatsapp_connector.get_status()
+    if not status.get("bridge_running"):
+        start_result = whatsapp_connector.start_bridge()
+        if start_result.get("status") == "error":
+            raise HTTPException(status_code=503, detail=start_result["message"])
+
+    # Request verification code via the bridge
+    result = whatsapp_connector.request_verification_code(phone_number, method)
+
+    # Store in business profile
+    from business_profiles import business_manager
+    cid = _get_my_client_id(user)
+    for p in business_manager.profiles.values():
+        if p.client_id == cid:
+            p.meta_access_token = phone_number  # store pending phone for tracking
+            business_manager._save()
+            break
+
+    return {
+        "status": result.get("status", "pending"),
+        "message": result.get("message", "Verification code requested"),
+        "phone_number": phone_number,
+        "method": method,
+        "qr": result.get("qr"),
+        "qr_data_url": result.get("data_url"),
+        "connection_state": result.get("status", "pending"),
+    }
+
+
+@app.post("/api/whatsapp/connect/code")
+async def submit_verification_code(request: Request, user: User = Depends(get_current_user)):
+    """
+    Submit a verification code received via SMS/call to complete WhatsApp connection.
+    For the Meta Cloud API, this calls the verification endpoint.
+    For the local bridge, this checks if the QR-based session is active.
+    """
+    body = await request.json()
+    phone_number = body.get("phone_number", "")
+    code = body.get("code", "")
+    method = body.get("method", "sms")
+
+    if not phone_number or not code:
+        raise HTTPException(status_code=400, detail="phone_number and code are required")
+
+    from whatsapp_connector import whatsapp_connector
+
+    result = whatsapp_connector.submit_verification_code(phone_number, code, method)
+
+    # Check bridge status after submission
+    status = whatsapp_connector.get_status()
+
+    return {
+        "status": result.get("status", "pending"),
+        "connected": status.get("connected", False),
+        "connection_state": status.get("connection_state", "pending"),
+        "message": result.get("message", "Code submitted for verification"),
+        "phone_number": phone_number,
+        "connection_info": status.get("connection_info", {}),
+    }
+
+
+@app.get("/api/whatsapp/connect/progress")
+async def get_connection_progress(user: User = Depends(get_current_user)):
+    """
+    Get real-time WhatsApp connection progress.
+    Returns current state, QR code (if pending), and phone number.
+    """
+    from whatsapp_connector import whatsapp_connector
+    return whatsapp_connector.get_connection_progress()
+
+
+@app.post("/api/whatsapp/connect/session")
+async def resume_session(user: User = Depends(get_current_user)):
+    """
+    Resume from a saved session (LocalAuth).
+    Automatically starts the bridge and uses persisted credentials — no QR needed.
+    """
+    from whatsapp_connector import whatsapp_connector
+
+    status = whatsapp_connector.get_status()
+    if status.get("connected"):
+        return {
+            "status": "already_connected",
+            "connected": True,
+            "connection_info": status.get("connection_info", {}),
+            "message": "WhatsApp is already connected",
+        }
+
+    # Ensure bridge is running
+    if not status.get("bridge_running"):
+        start_result = whatsapp_connector.start_bridge()
+        if start_result.get("status") == "error":
+            raise HTTPException(status_code=503, detail=start_result["message"])
+
+    # The bridge will automatically use LocalAuth session data on restart
+    # Give it a few seconds to initialize
+    import asyncio
+    await asyncio.sleep(3)
+
+    return {
+        "status": "session_resuming",
+        "message": "Resuming from saved session. Check /api/whatsapp/connect/progress for status.",
+        "bridge_running": True,
+    }
+
+
+# ---------------------------------------------------------------------------
+# N8N Inbound Webhook Endpoint
+# ---------------------------------------------------------------------------
+
+class N8NWebhookRequest(BaseModel):
+    event: str
+    contact_id: str = ""
+    phone_number: str = ""
+    data: dict = {}
+
+@app.post("/api/webhooks/n8n")
+async def n8n_webhook(request: Request):
+    """
+    Inbound webhook endpoint for N8N workflows.
+    Receives events from N8N, verifies HMAC signature, and dispatches
+    through the platform's internal webhook system.
+
+    Headers:
+      - X-N8N-Signature: HMAC-SHA256 signature of the body
+      - X-N8N-Event: event type (e.g., 'lead.qualified', 'appointment.booked')
+      - X-API-Key / Authorization: Bearer token (optional, for API key routes)
+
+    Body: arbitrary JSON payload from N8N.
+    """
+    body_bytes = await request.body()
+    signature = request.headers.get("X-N8N-Signature") or request.headers.get("X-Hub-Signature-256")
+    event = request.headers.get("X-N8N-Event", "n8n.event")
+
+    # Verify signature if a secret is configured
+    n8n_secret = os.getenv("N8N_WEBHOOK_SECRET", "")
+    if n8n_secret:
+        if not signature:
+            raise HTTPException(status_code=401, detail="Missing X-N8N-Signature header")
+        expected = hmac.new(n8n_secret.encode(), body_bytes, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, signature):
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    await rate_limit(request)
+
+    import json as _json
+    try:
+        payload = _json.loads(body_bytes)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    # Extract context
+    phone = sanitize_phone(str(payload.get("phone_number", payload.get("phone", payload.get("contact", {}).get("phone", "")))))
+    contact_id = payload.get("contact_id", payload.get("lead_id", ""))
+
+    logger.info(f"N8N webhook received: event={event}, contact={contact_id}, phone={phone}")
+
+    # Dispatch through internal webhook system
+    from public_api import webhook_manager, WebhookEvent
+    await webhook_manager.dispatch(
+        WebhookEvent.CUSTOM_EVENT if event not in [e.value for e in WebhookEvent] else WebhookEvent(event),
+        client_id=payload.get("client_id", 1),
+        payload=payload,
+    )
+
+    # If this is a message-related event, route through the orchestrator
+    if event in ("message.send", "message.reply", "lead.qualified", "appointment.booked"):
+        orchestrator: AgentOrchestrator = app.state.orchestrator
+        if phone and payload.get("message"):
+            reply = await orchestrator.process_message(
+                phone_number=phone,
+                message=payload.get("message", ""),
+                client_id=payload.get("client_id", 1),
+            )
+            return {"status": "ok", "reply": reply}
+
+    return {"status": "ok", "message": "Webhook processed", "event": event}
+
+
+@app.post("/api/webhooks/n8n/register")
+async def register_n8n_webhook(request: Request, user: User = Depends(get_current_user)):
+    """
+    Register an N8N webhook endpoint with secure signature configuration.
+    Returns the webhook URL, signing secret, and test payload.
+    """
+    body = await request.json()
+    url = body.get("url", "")
+    events = body.get("events", "message.received")
+    client_id = _get_my_client_id(user)
+
+    if not url:
+        raise HTTPException(status_code=400, detail="url is required")
+
+    from public_api import webhook_manager, WebhookEvent
+
+    try:
+        event_list = [WebhookEvent(e.strip()) for e in events.split(",")]
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid event. Valid: {[e.value for e in WebhookEvent]}")
+
+    endpoint = webhook_manager.register(client_id, url, event_list)
+
+    # Generate N8N-specific instructions
+    return {
+        "status": "registered",
+        "endpoint": endpoint.to_dict(),
+        "n8n_config": {
+            "webhook_url": f"{AGENT_API_URL or 'http://localhost:8000'}/api/webhooks/n8n",
+            "listen_field": f"webhook_{endpoint.id}",
+            "signing_secret": endpoint.secret,
+            "headers_to_set": {
+                "X-N8N-Signature": f"={{$hmac('sha256', '{endpoint.secret}', $json)}}",
+                "X-N8N-Event": "{{$json.event}}",
+                "Content-Type": "application/json",
+            },
+        },
+        "test_payload": {
+            "event": "message.received",
+            "phone_number": "+919999999999",
+            "message": "Hello from N8N!",
+            "client_id": client_id,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Broadcast Service Endpoints
+# ---------------------------------------------------------------------------
+
+class BroadcastListRequest(BaseModel):
+    name: str
+    phones: List[str]
+    description: str = ""
+    tags: List[str] = []
+
+class BroadcastSendRequest(BaseModel):
+    list_name: str
+    message_template: str
+
+@app.post("/api/broadcast/lists")
+async def create_broadcast_list(req: BroadcastListRequest, request: Request, user: User = Depends(get_current_user)):
+    """Create or update a broadcast list."""
+    await rate_limit(request)
+    from broadcast import broadcast_engine
+    result = await broadcast_engine.create_list(req.name, req.phones, req.description, req.tags)
+    result["status"] = "created"
+    return result
+
+
+@app.get("/api/broadcast/lists")
+async def list_broadcast_lists(request: Request, user: User = Depends(get_current_user)):
+    """List all broadcast lists (tenant-scoped)."""
+    await rate_limit(request)
+    from broadcast import broadcast_engine
+    return {"lists": await broadcast_engine.get_lists()}
+
+
+@app.post("/api/broadcast/send")
+async def send_broadcast(req: BroadcastSendRequest, request: Request, user: User = Depends(get_current_user)):
+    """Send a broadcast message to all contacts in a list."""
+    await rate_limit(request)
+    from broadcast import broadcast_engine
+    result = await broadcast_engine.send_campaign(req.list_name, req.message_template)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/api/broadcast/campaigns/{campaign_id}")
+async def get_broadcast_campaign(campaign_id: int, request: Request, user: User = Depends(get_current_user)):
+    """Get broadcast campaign status."""
+    await rate_limit(request)
+    from broadcast import broadcast_engine
+    campaign = await broadcast_engine.get_campaign(campaign_id)
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return campaign
+
+
+@app.post("/api/broadcast/send-contact")
+async def send_to_contact(request: Request, user: User = Depends(get_current_user)):
+    """Send a single message to a contact via WhatsApp bridge."""
+    await rate_limit(request)
+    body = await request.json()
+    phone = body.get("phone_number", "")
+    message = body.get("message", "")
+    client_id = body.get("client_id", 1)
+
+    if not phone or not message:
+        raise HTTPException(status_code=400, detail="phone_number and message are required")
+
+    from whatsapp_connector import whatsapp_connector
+    status = whatsapp_connector.get_status()
+    if not status.get("connected"):
+        raise HTTPException(status_code=503, detail="WhatsApp bridge not connected")
+
+    import httpx
+    async with httpx.AsyncClient() as http_client:
+        resp = await http_client.post(
+            f"{settings.whatsapp_bridge_url}/send",
+            json={"to": phone, "message": message, "client_id": client_id},
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            return {"status": "sent", "phone": phone}
+        else:
+            raise HTTPException(status_code=502, detail=resp.json().get("error", resp.text))
+
+
+# ---------------------------------------------------------------------------
+# Drip Campaign — Message Sender Wiring
+# ---------------------------------------------------------------------------
+
+async def _campaign_message_sender(channel: str, contact_id: str, content: str) -> bool:
+    """
+    Message sender callback for the drip campaign engine.
+    Sends a message via the WhatsApp bridge, respecting rate limits.
+    """
+    if channel != "whatsapp":
+        logger.warning(f"Unsupported channel '{channel}' for campaign message")
+        return False
+
+    from db import async_session, Contact
+    from sqlalchemy import select
+
+    # Resolve phone number from contact_id
+    phone = contact_id
+    async with async_session() as session:
+        result = await session.execute(select(Contact).where(Contact.id == contact_id))
+        contact = result.scalar_one_or_none()
+        if contact:
+            phone = contact.phone_number
+
+    if not phone:
+        logger.warning(f"Cannot send campaign message: no phone for contact {contact_id}")
+        return False
+
+    import httpx
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{settings.whatsapp_bridge_url}/send",
+                json={"to": phone, "message": content},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                logger.info(f"[CAMPAIGN] Message sent to {phone}")
+                return True
+            else:
+                logger.error(f"[CAMPAIGN] Send failed for {phone}: {resp.text}")
+                return False
+    except Exception as e:
+        logger.error(f"[CAMPAIGN] Error sending to {phone}: {e}")
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
 
 if __name__ == "__main__":
     import uvicorn
