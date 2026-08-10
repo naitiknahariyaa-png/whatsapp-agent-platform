@@ -40,8 +40,19 @@ from fastapi.security import HTTPAuthorizationCredentials
 from auth import security
 
 from db import init_db, get_session, save_message, get_conversation_history, upsert_contact
-from orchestrator import AgentOrchestrator
 from config import settings
+
+# Lazy-loaded orchestrator to keep deployment lightweight
+_AGENT_ORCHESTRATOR = None
+
+
+def get_orchestrator():
+    """Lazy import orchestrator to avoid pulling in langchain at startup."""
+    global _AGENT_ORCHESTRATOR
+    if _AGENT_ORCHESTRATOR is None:
+        from orchestrator import AgentOrchestrator
+        _AGENT_ORCHESTRATOR = AgentOrchestrator()
+    return _AGENT_ORCHESTRATOR
 from state_machine import get_state_machine, set_state_machine, RedisStateMachine, InMemoryStateMachine
 from logging_setup import get_logger
 from auth import (
@@ -75,7 +86,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"[v] State machine ready: {type(sm).__name__}")
     
     # Initialize orchestrator
-    app.state.orchestrator = AgentOrchestrator()
+    app.state.orchestrator = get_orchestrator()
     logger.info("[v] Agent orchestrator ready")
 
     # Start background scheduler (drip campaigns + appointment reminders)

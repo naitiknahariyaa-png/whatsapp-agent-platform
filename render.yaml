@@ -2,7 +2,7 @@ services:
   - type: web
     name: whatsapp-agent-platform
     env: python
-    buildCommand: pip install -r agent-engine/requirements.txt
+    buildCommand: pip install -r agent-engine/requirements-render.txt
     startCommand: cd agent-engine && python main.py
     healthCheckPath: /health
     envVars:
