@@ -50,7 +50,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: AGENT_API_URL
-        value: https://whatsapp-agent-platform-1.onrender.com
+        sync: false
       - key: WS_PORT
         value: 3002
       - key: HTTP_PORT
