@@ -23,6 +23,8 @@ let isConnected = false;
 let connectionState = 'disconnected';
 let currentQR = null;
 let currentQRDataUrl = null;
+let currentQRTimestamp = null;
+let refreshingQr = false;
 let whatsappInfo = null;
 
 async function forwardToAgent(event, data) {
@@ -83,6 +85,7 @@ function initClient() {
   client = createClient();
   client.on('qr', async (qr) => {
     currentQR = qr;
+    currentQRTimestamp = Date.now();
     connectionState = 'qr';
     try { currentQRDataUrl = await qrcode.toDataURL(qr); } catch (e) { currentQRDataUrl = null; }
     console.log('📱 QR code generated. Scan with WhatsApp -> Linked Devices.');
@@ -128,6 +131,48 @@ function initClient() {
   });
 }
 
+const SEND_WINDOW_MS = 60 * 1000;
+const MAX_SENDS_PER_MINUTE = 20;
+const sendHistory = [];
+
+function canSendMessage() {
+  const now = Date.now();
+  while (sendHistory.length && sendHistory[0] < now - SEND_WINDOW_MS) {
+    sendHistory.shift();
+  }
+  if (sendHistory.length >= MAX_SENDS_PER_MINUTE) {
+    return false;
+  }
+  sendHistory.push(now);
+  return true;
+}
+
+async function refreshQr() {
+  if (isConnected) {
+    return { status: 'connected', message: 'Already connected', qr: null };
+  }
+  if (refreshingQr) {
+    return { status: 'refreshing', message: 'QR refresh already in progress' };
+  }
+  refreshingQr = true;
+  try {
+    if (client) {
+      try { await client.destroy(); } catch (e) { /* ignore */ }
+      client = null;
+    }
+    currentQR = null;
+    currentQRDataUrl = null;
+    currentQRTimestamp = null;
+    connectionState = 'connecting';
+    isConnected = false;
+    whatsappInfo = null;
+    initClient();
+    return { status: 'refreshing', message: 'Refreshing QR code, please wait 5-10 seconds' };
+  } finally {
+    refreshingQr = false;
+  }
+}
+
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use((req, res, next) => {
@@ -143,15 +188,31 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/qr', (req, res) => {
-  if (currentQR && currentQRDataUrl) return res.json({ status: 'ready', qr: currentQR, data_url: currentQRDataUrl });
+  if (currentQR && currentQRDataUrl) {
+    const age = currentQRTimestamp ? Math.floor((Date.now() - currentQRTimestamp) / 1000) : null;
+    return res.json({
+      status: 'ready',
+      qr: currentQR,
+      data_url: currentQRDataUrl,
+      generated_at: currentQRTimestamp,
+      age_seconds: age,
+      message: 'Scan the QR code with WhatsApp to connect',
+    });
+  }
   if (connectionState === 'connected') return res.json({ status: 'connected', qr: null, message: 'Already connected' });
   return res.json({ status: 'waiting', qr: null, message: 'Waiting for QR code...' });
+});
+
+app.post('/qr/refresh', async (req, res) => {
+  const result = await refreshQr();
+  res.json(result);
 });
 
 app.post('/send', async (req, res) => {
   try {
     const { to, message } = req.body || {};
     if (!to || !message) return res.status(400).json({ error: 'to and message are required' });
+    if (!canSendMessage()) return res.status(429).json({ error: 'Rate limit exceeded. Try again in a few seconds.' });
     if (!isConnected || !client) return res.status(503).json({ error: 'WhatsApp not connected' });
     const chatId = to.includes('@') ? to : to + '@c.us';
     const sent = await client.sendMessage(chatId, message);
@@ -178,11 +239,14 @@ app.post('/broadcast', async (req, res) => {
     if (!isConnected || !client) return res.status(503).json({ error: 'WhatsApp not connected' });
     let sent = 0, failed = 0;
     for (const contact of contacts) {
+      if (!canSendMessage()) {
+        return res.status(429).json({ error: 'Rate limit exceeded while broadcasting. Try again later.' });
+      }
       try {
         const chatId = contact.includes('@') ? contact : contact + '@c.us';
         await client.sendMessage(chatId, message);
         sent++;
-        await new Promise((r) => setTimeout(r, 800 + Math.random() * 1200));
+        await new Promise((r) => setTimeout(r, 1000 + Math.random() * 1200));
       } catch (e) { failed++; }
     }
     return res.json({ status: 'complete', sent, failed });

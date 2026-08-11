@@ -10,14 +10,13 @@ from config import settings
 from vector_store import search_knowledge, add_knowledge_item, get_collection_stats
 
 try:
-    from langchain_groq import ChatGroq
     from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
     from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
     from langchain_core.output_parsers import StrOutputParser
     LANGCHAIN_AVAILABLE = True
 except ImportError:
     LANGCHAIN_AVAILABLE = False
-    print("[!] LangChain not installed. Run: pip install langchain langchain-groq langchain-core")
+    print("[!] LangChain core not installed. Run: pip install langchain langchain-groq langchain-core")
 
 
 class LangChainAgent:
@@ -28,34 +27,35 @@ class LangChainAgent:
         self._init_llm()
 
     def _init_llm(self):
-        """Initialize the LLM with fallback."""
+        """Initialize the LLM with fallback using centralized llm_setup."""
         if not LANGCHAIN_AVAILABLE:
             return
 
-        api_key = settings.groq_api_key
-        if not api_key or api_key == "your_groq_api_key_here":
-            print("[!] No Groq API key configured. AI features limited.")
-            return
-
         try:
-            self.llm = ChatGroq(
-                api_key=api_key,
-                model=settings.llm_model or "llama-3.3-70b-versatile",
-                temperature=0.7,
-                max_tokens=1024
-            )
-            print("[v] LangChain agent initialized with Groq")
+            from llm_setup import get_llm, get_provider_status
+            self.llm = get_llm()
+            status = get_provider_status()
+            active = [k for k, v in status.items() if v.get("available")]
+            if active:
+                print(f"[v] LangChain agent using LLM provider: {active[0]}")
+            else:
+                print("[i] LangChain agent initialized with MockLLM (no real LLM available)")
+        except ImportError as e:
+            print(f"[!] llm_setup not available: {e}")
         except Exception as e:
             print(f"[!] Failed to init LangChain LLM: {e}")
 
     @property
     def available(self) -> bool:
-        return self.llm is not None
+        if self.llm is None:
+            return False
+        llm_type = getattr(self.llm, '_llm_type', '')
+        return llm_type != 'mock'
 
     async def generate_response(self, message: str, history: List[Dict], client_id: int = 1,
                                 business_context: Dict = None) -> str:
         """Generate a response using LangChain with knowledge base retrieval."""
-        if not self.available:
+        if not self.available or self.llm is None:
             return self._fallback_response(message, business_context)
 
         # Retrieve relevant knowledge

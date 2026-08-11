@@ -171,7 +171,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     <div class="nav-item" onclick="showSection('templates')" id="nav-templates"><span class="nav-icon">💬</span><span>Templates</span></div>
     <div class="nav-item" onclick="showSection('theme')" id="nav-theme"><span class="nav-icon">🎨</span><span>Theme</span></div>
     <div class="nav-item" onclick="showSection('keys')" id="nav-keys"><span class="nav-icon">🔑</span><span>API Keys</span></div>
-    <div class="nav-item" onclick="showSection('whatsapp')" id="nav-whatsapp"><span class="nav-icon">📱</span><span>WhatsApp</span></div>
+    <div class="nav-item" onclick="showSection('whatsapp')" id="nav-whatsapp"><span class="nav-icon">📱</span><span>WhatsApp Admin</span></div>
     <div class="nav-item" onclick="showSection('health')" id="nav-health"><span class="nav-icon">🏥</span><span>Account Health</span></div>
     <div class="nav-item" onclick="showSection('storefront')" id="nav-storefront"><span class="nav-icon">🌐</span><span>Storefront</span></div>
     <div class="nav-item" style="color:var(--danger);border-top:1px solid var(--border);margin-top:8px;padding-top:12px" onclick="logout()"><span class="nav-icon">🚪</span><span>Logout</span></div>
@@ -293,6 +293,69 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     <table class="table"><thead><tr><th>Vertical</th><th>Orders</th><th>Revenue</th><th>Conversion</th><th>Response</th></tr></thead>
     <tbody id="verticalPerfBody"><tr><td colspan="5" style="text-align:center;color:var(--text-light)">Loading...</td></tr></tbody></table>
   </div>
+</div>
+
+<!-- WhatsApp Admin -->
+<div class="section" id="section-whatsapp">
+  <div class="page-header"><h1>📱 WhatsApp Bridge Admin</h1><p>Start/stop bridge, QR, Meta test-sends</p></div>
+  <div class="card">
+    <div class="controls">
+      <button id="start">Start Bridge</button>
+      <button id="stop">Stop Bridge</button>
+      <button id="refresh">Refresh QR</button>
+      <button id="statusBtn">Get Status</button>
+    </div>
+
+    <div style="margin-top:12px;margin-bottom:12px">
+      <strong>Admin Login (for sending):</strong>
+      <input id="loginEmail" placeholder="email" style="margin-left:8px" />
+      <input id="loginPassword" placeholder="password" type="password" style="margin-left:8px" />
+      <button id="loginBtn">Login</button>
+      <button id="logoutBtn" style="display:none">Logout</button>
+      <span id="loginMsg" class="small" style="margin-left:8px"></span>
+    </div>
+
+    <div id="status" class="status">
+      <div><strong>Bridge status:</strong> <span id="bridgeState">unknown</span></div>
+      <div><strong>Connected:</strong> <span id="connected">false</span></div>
+      <div><strong>Phone:</strong> <span id="phone">-</span></div>
+      <div class="small">Bridge URL: <span id="bridgeUrl">/api/whatsapp/bridge</span></div>
+    </div>
+
+    <h3>QR Code</h3>
+    <div id="qrWrap">
+      <div id="qrMessage">QR not loaded</div>
+      <img id="qrImg" class="qr" src="" alt="QR image" style="display:none"/>
+    </div>
+
+    <h3>Send Test</h3>
+    <div>
+      <input id="testTo" placeholder="phone (e.g. 9198...)" />
+      <input id="testMessage" placeholder="message" value="Hello from bridge admin" style="width:360px" />
+      <button id="sendTest">Send</button>
+      <div id="sendResult" class="small"></div>
+    </div>
+
+    <h3>Meta Cloud (Save & Test)</h3>
+    <div>
+      <input id="metaToken" placeholder="Meta Access Token" style="width:420px" />
+      <input id="metaPhoneId" placeholder="Meta Phone Number ID" style="margin-left:8px" />
+      <button id="saveMeta">Save</button>
+      <button id="testMeta">Test Send</button>
+      <div id="metaResult" class="small"></div>
+    </div>
+
+    <h3>Saved Keys</h3>
+    <div id="keysArea" class="status small">
+      <div>WhatsApp API Key: <span id="wh_key">(not set)</span> <button id="showWhKey">Show</button></div>
+      <div>Telegram Token: <span id="tg_key">(not set)</span> <button id="showTgKey">Show</button></div>
+      <div id="keysMsg" class="small"></div>
+    </div>
+
+    <h3>Bridge Health</h3>
+    <div id="health" class="status small">Loading...</div>
+  </div>
+  <script src="/js/whatsapp_admin.js"></script>
 </div>
 
 <!-- CRM -->
@@ -500,7 +563,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 <script>
 (function() {
   var s = document.createElement('script');
-  s.src = window.location.origin + '/widget.js?biz=' + 'YOUR_BIZ_ID';
+  s.src = window.location.origin + '/widget.js?biz=' + encodeURIComponent('YOUR_BIZ_ID');
   s.async = true;
   document.body.appendChild(s);
 })();

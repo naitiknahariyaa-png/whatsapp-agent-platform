@@ -90,6 +90,49 @@ class SecretsManager:
             result[key] = self.is_configured(key)
         return result
 
+    # --- Encryption helpers (Fernet) ---
+    def _get_fernet_key(self) -> bytes:
+        """Derive a Fernet key from the JWT_SECRET_KEY environment secret."""
+        import hashlib, base64
+        key = os.getenv("JWT_SECRET_KEY") or os.getenv("jwt_secret_key") or ""
+        if not key:
+            # Fallback to a file-based key in .env if present
+            key = os.getenv("DEV_FALLBACK_KEY", "dev-local-key-change-me")
+        # Use SHA256 digest and base64-urlsafe-encode for Fernet
+        digest = hashlib.sha256(key.encode()).digest()
+        return base64.urlsafe_b64encode(digest)
+
+    def encrypt(self, plaintext: str) -> str:
+        """Encrypt a plaintext string and return a URL-safe base64 token."""
+        if not plaintext:
+            return ""
+        try:
+            from cryptography.fernet import Fernet
+            k = self._get_fernet_key()
+            f = Fernet(k)
+            token = f.encrypt(plaintext.encode()).decode()
+            return token
+        except Exception:
+            # Fallback: return plaintext (not encrypted)
+            return plaintext
+
+    def decrypt(self, token: str) -> str:
+        """Decrypt a token produced by `encrypt` or return original on failure."""
+        if not token:
+            return ""
+        try:
+            from cryptography.fernet import Fernet
+            k = self._get_fernet_key()
+            f = Fernet(k)
+            try:
+                plain = f.decrypt(token.encode()).decode()
+                return plain
+            except Exception:
+                # token might be plain already
+                return token
+        except Exception:
+            return token
+
 
 # Singleton instance
 secrets = SecretsManager()

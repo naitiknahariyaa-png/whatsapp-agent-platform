@@ -200,6 +200,28 @@ class LeadGenAgent:
                 "created_at": l.created_at.isoformat() if l.created_at else None
             } for l in leads]
 
+    async def get_lead_detail(self, lead_id: int) -> Optional[Dict]:
+        """Return full lead record by id."""
+        async with async_session() as session:
+            result = await session.execute(select(Lead).where(Lead.id == lead_id))
+            l = result.scalar_one_or_none()
+            if not l:
+                return None
+            return {
+                "id": l.id,
+                "phone": l.phone_number,
+                "name": l.name,
+                "source": l.source,
+                "score": l.lead_score,
+                "status": l.status,
+                "budget": l.budget,
+                "location": l.location,
+                "requirement": l.requirement,
+                "qualification": l.qualification_data,
+                "created_at": l.created_at.isoformat() if l.created_at else None,
+                "updated_at": l.updated_at.isoformat() if l.updated_at else None,
+            }
+
     async def update_lead_status(self, lead_id: int, status: str) -> Dict:
         """Update lead status (new → qualified → contacted → converted/lost)"""
         valid = ["new", "qualified", "contacted", "converted", "lost"]

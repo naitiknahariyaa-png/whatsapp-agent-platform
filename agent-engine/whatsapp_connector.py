@@ -7,6 +7,7 @@ Supports:
 - Session persistence and reconnection (LocalAuth in .wwebjs_auth)
 - Real-time connection status tracking (via /health, /status, and WebSocket)
 - One-click connection using verification codes (Meta Cloud API path)
+- Auto-reconnection on disconnect
 """
 import os
 import sys
@@ -24,6 +25,7 @@ BRIDGE_DIR = Path(__file__).parent.parent / "whatsapp-bridge"
 BRIDGE_SCRIPT = BRIDGE_DIR / "bridge.js"
 BRIDGE_HTTP_PORT = int(os.getenv("BRIDGE_HTTP_PORT", "3001"))
 BRIDGE_WS_PORT = int(os.getenv("BRIDGE_WS_PORT", "3002"))
+AUTO_RECONNECT = os.getenv("WA_AUTO_RECONNECT", "true").lower() in ("1", "true", "yes")
 
 
 class WhatsAppConnector:
@@ -38,7 +40,9 @@ class WhatsAppConnector:
         self._connection_info: Dict = {}
         self._start_attempts = 0
         self._connection_state: str = "disconnected"
-        self._phone_number: Optional[str] = None  # for automated verification
+        self._phone_number: Optional[str] = None
+        self._reconnect_thread: Optional[threading.Thread] = None
+        self._reconnect_stop = threading.Event()
 
     @property
     def is_running(self) -> bool:
@@ -62,7 +66,6 @@ class WhatsAppConnector:
                 return {"status": "error", "message": f"Bridge script not found at {BRIDGE_SCRIPT}"}
 
             try:
-                # Check if node is available
                 node_check = subprocess.run(
                     ["node", "--version"],
                     capture_output=True,
@@ -72,7 +75,6 @@ class WhatsAppConnector:
                 if node_check.returncode != 0:
                     return {"status": "error", "message": "Node.js is not installed. Please install Node.js to connect WhatsApp."}
 
-                # Check if dependencies are installed
                 node_modules = BRIDGE_DIR / "node_modules"
                 if not node_modules.exists():
                     return {
@@ -80,7 +82,6 @@ class WhatsAppConnector:
                         "message": "Bridge dependencies not installed. Run: cd whatsapp-bridge && npm install",
                     }
 
-                # Start the bridge process
                 env = os.environ.copy()
                 env["HTTP_PORT"] = str(BRIDGE_HTTP_PORT)
                 env["WS_PORT"] = str(BRIDGE_WS_PORT)
@@ -99,8 +100,10 @@ class WhatsAppConnector:
                 self.bridge_started_at = time.time()
                 self._start_attempts += 1
 
-                # Start monitoring thread
                 threading.Thread(target=self._monitor_bridge, daemon=True).start()
+
+                if AUTO_RECONNECT:
+                    self._start_reconnect_monitor()
 
                 return {
                     "status": "started",
@@ -111,6 +114,31 @@ class WhatsAppConnector:
 
             except Exception as e:
                 return {"status": "error", "message": f"Failed to start bridge: {str(e)}"}
+
+    def _start_reconnect_monitor(self):
+        """Start background thread to monitor and auto-reconnect."""
+        if self._reconnect_thread and self._reconnect_thread.is_alive():
+            return
+        self._reconnect_stop.clear()
+        self._reconnect_thread = threading.Thread(target=self._reconnect_loop, daemon=True)
+        self._reconnect_thread.start()
+
+    def _reconnect_loop(self):
+        """Background loop that checks connection and reconnects if needed."""
+        while not self._reconnect_stop.is_set():
+            try:
+                time.sleep(30)
+                if self._reconnect_stop.is_set():
+                    break
+                status = self.get_status()
+                if not status.get("connected") and status.get("bridge_online"):
+                    if self._connection_state in ("disconnected", "failed", "offline"):
+                        print("[WhatsAppConnector] Auto-reconnecting...")
+                        refresh_result = self.refresh_qr()
+                        if refresh_result.get("status") == "refreshing":
+                            print("[WhatsAppConnector] QR refresh initiated for reconnect")
+            except Exception:
+                pass
 
     def _monitor_bridge(self):
         """Monitor bridge output for QR codes and connection status."""
@@ -123,7 +151,6 @@ class WhatsAppConnector:
                 if not line:
                     continue
 
-                # Check for connection
                 if "WhatsApp connected" in line or "ready" in line.lower():
                     self._connected = True
                     self._connection_state = "connected"
@@ -149,6 +176,7 @@ class WhatsAppConnector:
 
     def stop_bridge(self) -> Dict:
         """Stop the bridge process."""
+        self._reconnect_stop.set()
         with self._lock:
             if self.bridge_process and self.is_running:
                 self.bridge_process.terminate()
@@ -207,6 +235,8 @@ class WhatsAppConnector:
                         "status": "ready",
                         "qr": data["qr"],
                         "data_url": data.get("data_url"),
+                        "qr_data_url": data.get("data_url"),
+                        "qr_image": data.get("data_url"),
                         "message": "Scan QR with WhatsApp to connect",
                     }
                 elif data.get("status") == "waiting":
@@ -218,11 +248,6 @@ class WhatsAppConnector:
             return {"status": "offline", "qr": None, "message": f"Bridge offline: {str(e)}"}
 
     def request_verification_code(self, phone_number: str, method: str = "sms") -> Dict:
-        """
-        Request a verification code for the given phone number via the bridge.
-        For the local bridge (whatsapp-web.js), this triggers QR generation.
-        For Meta Cloud API, this would use the official verification flow.
-        """
         try:
             resp = httpx.post(
                 f"http://localhost:{BRIDGE_HTTP_PORT}/connect/request-code",
@@ -237,12 +262,25 @@ class WhatsAppConnector:
         except Exception as e:
             return {"status": "offline", "message": f"Bridge offline: {str(e)}"}
 
+    def refresh_qr(self) -> Dict:
+        status = self.get_status()
+        if not status.get("bridge_online"):
+            start_result = self.start_bridge()
+            if start_result.get("status") == "error":
+                return start_result
+
+        try:
+            resp = httpx.post(
+                f"http://localhost:{BRIDGE_HTTP_PORT}/qr/refresh",
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            return {"status": "error", "message": f"Bridge returned {resp.status_code}: {resp.text}"}
+        except Exception as e:
+            return {"status": "offline", "message": f"Bridge offline: {str(e)}"}
+
     def submit_verification_code(self, phone_number: str, code: str, method: str = "sms") -> Dict:
-        """
-        Submit a verification code to complete WhatsApp connection.
-        For the local bridge, this is informational (QR-based auth is used).
-        For Meta Cloud API, the code completes phone verification.
-        """
         try:
             resp = httpx.post(
                 f"http://localhost:{BRIDGE_HTTP_PORT}/connect/verify",
@@ -275,10 +313,6 @@ class WhatsAppConnector:
             return {"status": "offline", "message": f"Bridge offline: {str(e)}"}
 
     def get_connection_progress(self) -> Dict:
-        """
-        Get real-time connection progress for automated phone verification.
-        Returns the current state, QR code (if available), and phone number.
-        """
         status = self.get_status()
         qr_data = self.get_qr() if not status["connected"] else {"status": "connected", "qr": None}
         return {
@@ -292,24 +326,11 @@ class WhatsAppConnector:
         }
 
     def automated_connect(self, phone_number: str, method: str = "sms") -> Dict:
-        """
-        Fully automated phone number verification without QR scanning.
-
-        Starts the bridge (if not running), requests a verification code,
-        and tracks connection progress in real time.
-        
-        For the local bridge (whatsapp-web.js), this triggers QR generation
-        with session persistence via .wwebjs_auth (LocalAuth).
-        
-        For Meta Cloud API (via bridge), this uses the official verification flow.
-        """
-        # Ensure bridge is running
         if not self.is_running:
             start_result = self.start_bridge()
             if start_result.get("status") == "error":
                 return start_result
 
-        # Request verification code / QR
         code_result = self.request_verification_code(phone_number, method)
         status = self.get_status()
 
@@ -330,16 +351,9 @@ class WhatsAppConnector:
         }
 
     def connect_with_code(self, phone_number: str, code: str, method: str = "sms") -> Dict:
-        """
-        One-click WhatsApp connection using a verification code.
-        
-        Submits the code received via SMS or voice call to complete
-        the automated phone verification process.
-        """
         result = self.submit_verification_code(phone_number, code, method)
         status = self.get_status()
 
-        # Poll for a few seconds to confirm connection
         for _ in range(5):
             if status.get("connected"):
                 break
@@ -352,20 +366,14 @@ class WhatsAppConnector:
         return result
 
     def verify_code(self, phone_number: str, code: str, method: str = "sms") -> Dict:
-        """
-        Verify a WhatsApp verification code and confirm connection.
-        
-        Alias for connect_with_code with additional status polling.
-        """
         result = self.connect_with_code(phone_number, code, method)
         if result.get("connected"):
-            result["message"] = "WhatsApp verification successful � account connected!"
+            result["message"] = "WhatsApp verification successful - account connected!"
         else:
             result["message"] = "Verification submitted. Check status with get_status()."
         return result
 
     def _get_state_message(self, state: str) -> str:
-        """Human-readable message for a connection state."""
         messages = {
             "disconnected": "Bridge is not connected. Click 'Start Bridge' to begin.",
             "connecting": "Connecting to WhatsApp...",

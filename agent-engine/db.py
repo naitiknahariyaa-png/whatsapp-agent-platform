@@ -103,6 +103,51 @@ class Appointment(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class Booking(Base):
+    """Generic booking/order from web chat widget or other channels."""
+    __tablename__ = "bookings"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True)
+    contact_id: Mapped[Optional[int]] = mapped_column(ForeignKey("contacts.id"))
+    business_id: Mapped[Optional[str]] = mapped_column(String(50), index=True)
+    business_type: Mapped[str] = mapped_column(String(50), default="general")
+    intent: Mapped[str] = mapped_column(String(50), default="booking_request")
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    date: Mapped[Optional[str]] = mapped_column(String(20))
+    time: Mapped[Optional[str]] = mapped_column(String(20))
+    party_size: Mapped[Optional[int]] = mapped_column(Integer)
+    service_type: Mapped[Optional[str]] = mapped_column(String(255))
+    customer_name: Mapped[Optional[str]] = mapped_column(String(255))
+    customer_contact: Mapped[Optional[str]] = mapped_column(String(255))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    raw_extracted: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    source: Mapped[str] = mapped_column(String(50), default="web_chat")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self) -> Dict:
+        return {
+            "id": self.id,
+            "client_id": self.client_id,
+            "contact_id": self.contact_id,
+            "business_id": self.business_id,
+            "business_type": self.business_type,
+            "intent": self.intent,
+            "status": self.status,
+            "date": self.date,
+            "time": self.time,
+            "party_size": self.party_size,
+            "service_type": self.service_type,
+            "customer_name": self.customer_name,
+            "customer_contact": self.customer_contact,
+            "notes": self.notes,
+            "raw_extracted": self.raw_extracted,
+            "source": self.source,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class ConversationSession(Base):
     """Persistent conversation session for slot-filling and context."""
     __tablename__ = "conversation_sessions"
@@ -121,6 +166,9 @@ class ConversationSession(Base):
     last_activity_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+from broadcast import BroadcastList, BroadcastCampaign  # noqa: F401 - ensure tables are registered
 
 
 async def get_session():
@@ -289,3 +337,41 @@ async def update_session_after_message(session, client_id: int, phone_number: st
     await session.commit()
     await session.refresh(conv_session)
     return conv_session
+
+
+# -- Booking helpers for web chat widget --
+
+async def create_booking(session, client_id: int, business_id: str, business_type: str,
+                         extracted: dict, source: str = "web_chat") -> "Booking":
+    """Create a booking row from LLM-extracted fields."""
+    booking = Booking(
+        client_id=client_id,
+        business_id=business_id,
+        business_type=business_type,
+        intent=extracted.get("intent", "booking_request"),
+        date=extracted.get("date"),
+        time=extracted.get("time"),
+        party_size=extracted.get("party_size"),
+        service_type=extracted.get("service_type"),
+        customer_name=extracted.get("customer_name"),
+        customer_contact=extracted.get("customer_contact"),
+        notes=extracted.get("notes"),
+        raw_extracted=extracted,
+        source=source,
+    )
+    session.add(booking)
+    await session.commit()
+    await session.refresh(booking)
+    return booking
+
+
+async def get_bookings(client_id: int, business_id: str = "", limit: int = 50):
+    """List bookings for a client/business."""
+    async with async_session() as session:
+        query = select(Booking).where(Booking.client_id == client_id)
+        if business_id:
+            query = query.where(Booking.business_id == business_id)
+        query = query.order_by(Booking.created_at.desc()).limit(limit)
+        result = await session.execute(query)
+        bookings = result.scalars().all()
+        return [b.to_dict() for b in bookings]

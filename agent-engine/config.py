@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     llm_model: str = "llama-3.3-70b-versatile"
     llm_provider: str = "groq"
     ollama_base_url: str = "http://localhost:11434"
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
     database_url: str = "sqlite+aiosqlite:///./wap_data.db"
     redis_url: str = "redis://localhost:6379/0"
     chroma_host: str = "localhost"

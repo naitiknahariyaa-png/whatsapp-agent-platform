@@ -33,6 +33,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 from fastapi import Depends
@@ -102,7 +103,13 @@ async def _send_via_meta(phone_number: str, text: str, client_id: int = 1) -> di
             from business_profiles import business_manager
             for p in business_manager.profiles.values():
                 if p.client_id == client_id:
-                    access_token = getattr(p, 'meta_access_token', '') or ''
+                    # decrypt stored access token if encrypted
+                    access_token_raw = getattr(p, 'meta_access_token', '') or ''
+                    try:
+                        from secrets_manager import secrets as secrets_mgr
+                        access_token = secrets_mgr.decrypt(access_token_raw) or access_token_raw
+                    except Exception:
+                        access_token = access_token_raw
                     phone_number_id = getattr(p, 'meta_phone_number_id', '') or ''
                     break
     except Exception:
@@ -151,6 +158,19 @@ async def lifespan(app: FastAPI):
     app.state.orchestrator = get_orchestrator()
     logger.info("[v] Agent orchestrator ready")
 
+    # Log LLM provider status
+    try:
+        from llm_setup import get_provider_status
+        provider_status = get_provider_status()
+        active = [k for k, v in provider_status.items() if v.get("available")]
+        if active:
+            logger.info(f"[v] Active LLM provider: {active[0]}")
+        else:
+            logger.warning("[!] No real LLM provider available. Using MockLLM for responses.")
+            logger.warning("[!] Configure GROQ_API_KEY, OLLAMA, or OPENAI_API_KEY for full AI.")
+    except ImportError:
+        logger.warning("[!] llm_setup module not available for diagnostics")
+
     # Start background scheduler (drip campaigns + appointment reminders)
     from scheduler import start_scheduler, stop_scheduler
     await start_scheduler()
@@ -162,6 +182,21 @@ async def lifespan(app: FastAPI):
         logger.info("[v] Drip campaign message sender wired to WhatsApp bridge")
     except Exception as e:
         logger.warning(f"Drip campaign message sender not wired: {e}")
+
+    # Auto-start WhatsApp bridge if configured
+    try:
+        from whatsapp_connector import whatsapp_connector
+        bridge_status = whatsapp_connector.get_status()
+        if not bridge_status.get("bridge_running"):
+            start_result = whatsapp_connector.start_bridge()
+            if start_result.get("status") == "started":
+                logger.info("[v] WhatsApp bridge auto-started")
+            else:
+                logger.warning(f"[!] WhatsApp bridge auto-start failed: {start_result.get('message')}")
+        else:
+            logger.info("[v] WhatsApp bridge already running")
+    except Exception as e:
+        logger.warning(f"[!] WhatsApp bridge auto-start error: {e}")
 
     # Start Telegram bot bridge if token is configured
     if settings.telegram_bot_token and settings.telegram_bot_token != "your_telegram_bot_token_here":
@@ -219,6 +254,20 @@ class MessageResponse(BaseModel):
     reply: str
     phone_number: str
 
+class ChatRequest(BaseModel):
+    business_id: str
+    message: str
+    customer_id: str = ""
+    client_id: int = 1
+
+class ChatResponse(BaseModel):
+    reply_to_customer: str
+    intent: str
+    ready_to_book: bool
+    extracted: dict
+    booking_saved: bool
+    owner_notified: bool
+
 class SignupRequest(BaseModel):
     name: str
     email: str
@@ -240,6 +289,23 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/llm/status")
+async def llm_status():
+    """Get LLM provider status and diagnostics."""
+    try:
+        from llm_setup import get_provider_status
+        status = get_provider_status()
+        active = [k for k, v in status.items() if v.get("available")]
+        return {
+            "active_provider": active[0] if active else "mock",
+            "providers": status,
+            "configured_provider": settings.llm_provider,
+            "model": settings.llm_model,
+        }
+    except ImportError:
+        return {"active_provider": "unknown", "error": "llm_setup module not available"}
 
 @app.get("/sitemap.xml")
 async def sitemap():
@@ -323,6 +389,68 @@ async def handle_message(req: MessageRequest, request: Request):
     except Exception as e:
         logger.error(f"Error processing message: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def handle_chat(req: ChatRequest, request: Request):
+    """
+    Web chat widget endpoint — processes a customer message through the
+    multi-business chat assistant and returns structured JSON.
+
+    If booking is ready, saves to DB and notifies owner via WhatsApp.
+    """
+    await rate_limit(request, str(req.client_id))
+    try:
+        from chat_assistant import process_chat_message
+        result = await process_chat_message(
+            business_id=req.business_id,
+            customer_message=sanitize_text(req.message),
+            customer_identifier=req.customer_id,
+            client_id=req.client_id,
+        )
+        return ChatResponse(**result)
+    except Exception as e:
+        logger.error(f"Error in chat endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/widget.js")
+async def widget_js():
+    """Serve the embeddable web chat widget JavaScript."""
+    widget_path = os.path.join(_FRONTEND_DIR, "widget.js")
+    if os.path.exists(widget_path):
+        return FileResponse(widget_path, media_type="application/javascript")
+    return Response(content="console.log('Widget not found')", media_type="application/javascript")
+
+
+@app.get("/api/bookings")
+async def list_bookings(business_id: str = "", client_id: int = 1, user: User = Depends(get_current_user)):
+    """List bookings from the web chat widget."""
+    from db import get_bookings
+    cid = _get_my_client_id(user)
+    bookings = await get_bookings(cid, business_id=business_id)
+    return {"bookings": bookings}
+
+
+@app.post("/api/bookings/{booking_id}/status")
+async def update_booking_status(booking_id: int, request: Request, user: User = Depends(get_current_user)):
+    """Update booking status (pending/confirmed/cancelled)."""
+    from db import async_session, Booking
+    from sqlalchemy import select
+    body = await request.json()
+    new_status = body.get("status", "")
+    if not new_status:
+        raise HTTPException(status_code=400, detail="status is required")
+    async with async_session() as session:
+        result = await session.execute(select(Booking).where(Booking.id == booking_id))
+        booking = result.scalar_one_or_none()
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        booking.status = new_status
+        booking.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        await session.refresh(booking)
+        return {"status": "updated", "booking_id": booking_id, "new_status": new_status}
 
 
 @app.get("/webhook")
@@ -448,6 +576,25 @@ async def auth_login(req: LoginRequest, request: Request):
         user={"id": user.id, "email": user.email, "full_name": user.full_name,
               "role": user.role, "client_id": user.client_id},
     )
+
+
+@app.post("/auth/dev-create-admin")
+async def auth_dev_create_admin(request: Request):
+    """Dev-only: create an admin user and return credentials. Only allowed from localhost."""
+    # Only allow when request originates from localhost
+    host = request.client.host if request.client else ""
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(status_code=403, detail="Not allowed")
+    # Create an admin user with random password
+    import secrets
+    email = f"admin@local"
+    password = secrets.token_urlsafe(12)
+    try:
+        user = await create_user(email=email, password=password, full_name="Dev Admin", role=Role.ADMIN.value, client_id=1)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    token = create_access_token(user.id, user.email, user.role, user.client_id)
+    return {"status": "created", "email": email, "password": password, "access_token": token}
 
 
 @app.get("/auth/me")
@@ -790,6 +937,92 @@ async def referral_stats(client_id: int = 1):
     from referral_system import referral_system
     return referral_system.get_stats(client_id)
 
+
+# -------------------------
+# CRM / Leads API
+# -------------------------
+
+
+@app.get("/api/crm/leads")
+async def crm_list_leads(status: str = "", user: User = Depends(get_current_user)):
+    """List leads (optionally filter by status)."""
+    try:
+        from lead_gen import lead_gen_agent
+        leads = await lead_gen_agent.get_leads(status)
+        return {"leads": leads}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/crm/leads")
+async def crm_create_lead(request: Request, user: User = Depends(get_current_user)):
+    """Create or update a lead."""
+    body = await request.json()
+    phone = body.get("phone_number") or body.get("phone")
+    if not phone:
+        raise HTTPException(status_code=400, detail="phone_number required")
+    name = body.get("name", "")
+    source = body.get("source", "manual")
+    campaign_id = body.get("campaign_id", "")
+    ad_id = body.get("ad_id", "")
+    try:
+        from lead_gen import lead_gen_agent
+        lead = await lead_gen_agent.create_lead(phone_number=phone, name=name, source=source, campaign_id=campaign_id, ad_id=ad_id)
+        return {"status": "ok", "lead": {"id": lead.id, "phone": lead.phone_number, "name": lead.name, "status": lead.status}}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/crm/leads/{lead_id}")
+async def crm_get_lead(lead_id: int, user: User = Depends(get_current_user)):
+    try:
+        from lead_gen import lead_gen_agent
+        detail = await lead_gen_agent.get_lead_detail(lead_id)
+        if not detail:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        return detail
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/crm/leads/{lead_id}/status")
+async def crm_update_lead_status(lead_id: int, request: Request, user: User = Depends(get_current_user)):
+    body = await request.json()
+    status_val = body.get("status", "")
+    if not status_val:
+        raise HTTPException(status_code=400, detail="status required")
+    try:
+        from lead_gen import lead_gen_agent
+        result = await lead_gen_agent.update_lead_status(lead_id, status_val)
+        if result.get("error"):
+            raise HTTPException(status_code=400, detail=result.get("error"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/crm/qualify")
+async def crm_qualify(request: Request, user: User = Depends(get_current_user)):
+    """Qualify a lead using extracted entities.
+    Expects { phone_number, message, entities }
+    """
+    body = await request.json()
+    phone = body.get("phone_number") or body.get("phone")
+    message = body.get("message", "")
+    entities = body.get("entities", {})
+    if not phone:
+        raise HTTPException(status_code=400, detail="phone_number required")
+    try:
+        from lead_gen import lead_gen_agent
+        res = await lead_gen_agent.qualify_lead(phone, message, entities)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/webhooks/register")
 async def register_webhook(url: str, events: str, client_id: int = 1):
     """Register a webhook endpoint"""
@@ -894,12 +1127,16 @@ async def connect_whatsapp_meta(request: Request, user: User = Depends(get_curre
     phone_number_id = body.get("phone_number_id", "")
     if not access_token or not phone_number_id:
         raise HTTPException(status_code=400, detail="access_token and phone_number_id required")
-    # Store in user's business profile
+    # Store in user's business profile (encrypt token)
     from business_profiles import business_manager
     cid = _get_my_client_id(user)
     for p in business_manager.profiles.values():
         if p.client_id == cid:
-            p.meta_access_token = access_token
+            try:
+                from secrets_manager import secrets as secrets_mgr
+                p.meta_access_token = secrets_mgr.encrypt(access_token)
+            except Exception:
+                p.meta_access_token = access_token
             p.meta_phone_number_id = phone_number_id
             business_manager._save()
             return {"status": "connected", "message": "WhatsApp connected via Meta Cloud API"}
@@ -1013,8 +1250,12 @@ async def save_whatsapp_api_key(request: Request, user: User = Depends(get_curre
     cid = _get_my_client_id(user)
     for p in business_manager.profiles.values():
         if p.client_id == cid:
-            # Store API key (in production, encrypt this)
-            p.whatsapp_api_key = api_key
+            # Store API key (encrypted when possible)
+            try:
+                from secrets_manager import secrets as secrets_mgr
+                p.whatsapp_api_key = secrets_mgr.encrypt(api_key)
+            except Exception:
+                p.whatsapp_api_key = api_key
             business_manager._save()
             return {"status": "saved", "message": "WhatsApp API key saved"}
     raise HTTPException(status_code=404, detail="Create business profile first")
@@ -1038,9 +1279,29 @@ async def get_api_keys(user: User = Depends(get_current_user)):
     }
     for p in business_manager.profiles.values():
         if p.client_id == cid:
-            # Return masked keys
+            # Return masked keys; decrypt if stored encrypted
+            try:
+                from secrets_manager import secrets as secrets_mgr
+            except Exception:
+                secrets_mgr = None
             if hasattr(p, 'whatsapp_api_key') and p.whatsapp_api_key:
-                keys["whatsapp_api_key"] = p.whatsapp_api_key[:4] + "..." + p.whatsapp_api_key[-4:]
+                val = p.whatsapp_api_key
+                if secrets_mgr:
+                    try:
+                        plain = secrets_mgr.decrypt(val)
+                        val = plain
+                    except Exception:
+                        pass
+                keys["whatsapp_api_key"] = (val[:4] + "..." + val[-4:]) if len(val) > 8 else "****"
+            if hasattr(p, 'telegram_bot_token') and p.telegram_bot_token:
+                val = p.telegram_bot_token
+                if secrets_mgr:
+                    try:
+                        plain = secrets_mgr.decrypt(val)
+                        val = plain
+                    except Exception:
+                        pass
+                keys["telegram_bot_token"] = (val[:4] + "..." + val[-4:]) if len(val) > 8 else "****"
             break
     # Check global settings for this user's keys
     if settings.telegram_bot_token:
@@ -1050,6 +1311,33 @@ async def get_api_keys(user: User = Depends(get_current_user)):
     if settings.figma_api_token:
         keys["figma_api_token"] = "configured"
     return {"keys": keys}
+
+
+@app.post("/api/keys/get")
+async def get_api_key(request: Request, user: User = Depends(get_current_user)):
+    """Return decrypted API key for a given key_name (owner-only)."""
+    body = await request.json()
+    key_name = body.get("key_name", "")
+    if not key_name:
+        raise HTTPException(status_code=400, detail="key_name required")
+    from business_profiles import business_manager
+    cid = _get_my_client_id(user)
+    for p in business_manager.profiles.values():
+        if p.client_id == cid:
+            val = None
+            if key_name == "whatsapp_api_key" and hasattr(p, 'whatsapp_api_key'):
+                val = p.whatsapp_api_key
+            elif key_name == "telegram_bot_token" and hasattr(p, 'telegram_bot_token'):
+                val = p.telegram_bot_token
+            if not val:
+                raise HTTPException(status_code=404, detail="Key not found")
+            try:
+                from secrets_manager import secrets as secrets_mgr
+                plain = secrets_mgr.decrypt(val)
+            except Exception:
+                plain = val
+            return {"key_name": key_name, "value": plain}
+    raise HTTPException(status_code=404, detail="Business profile not found")
 
 
 @app.post("/api/keys/save")
@@ -1065,10 +1353,15 @@ async def save_api_key(request: Request, user: User = Depends(get_current_user))
     cid = _get_my_client_id(user)
     for p in business_manager.profiles.values():
         if p.client_id == cid:
+            # Encrypt keys where applicable
+            try:
+                from secrets_manager import secrets as secrets_mgr
+            except Exception:
+                secrets_mgr = None
             if key_name == "whatsapp_api_key":
-                p.whatsapp_api_key = key_value
+                p.whatsapp_api_key = secrets_mgr.encrypt(key_value) if secrets_mgr else key_value
             elif key_name == "telegram_bot_token":
-                p.telegram_bot_token = key_value
+                p.telegram_bot_token = secrets_mgr.encrypt(key_value) if secrets_mgr else key_value
             elif key_name == "webhook_url":
                 p.webhook_url = key_value
             business_manager._save()
@@ -1527,6 +1820,122 @@ async def bridge_status():
     """Get WhatsApp bridge status"""
     from whatsapp_connector import whatsapp_connector
     return whatsapp_connector.get_status()
+
+
+@app.post("/api/whatsapp/bridge/refresh")
+async def bridge_refresh():
+    """Refresh the WhatsApp bridge QR code by restarting or reinitializing the bridge."""
+    from whatsapp_connector import whatsapp_connector
+    result = whatsapp_connector.refresh_qr()
+    if result.get("status") == "error":
+        raise HTTPException(status_code=503, detail=result.get("message", "Failed to refresh bridge"))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Development-only test send (no auth) — local use only
+# ---------------------------------------------------------------------------
+@app.post("/api/whatsapp/test-send")
+async def whatsapp_test_send(request: Request):
+    """Send a test message via the active WhatsApp bridge. Localhost only."""
+    body = await request.json()
+    phone = body.get("phone_number") or body.get("to") or ""
+    message = body.get("message", "")
+    if not phone or not message:
+        raise HTTPException(status_code=400, detail="phone_number and message required")
+
+    # Restrict to local requests for safety
+    client_host = request.client.host if getattr(request, 'client', None) else None
+    if client_host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(status_code=403, detail="Forbidden: test-send allowed from localhost only")
+
+    from whatsapp_connector import whatsapp_connector
+
+    status = whatsapp_connector.get_status()
+    if not status.get("connected"):
+        raise HTTPException(status_code=503, detail="WhatsApp bridge not connected")
+
+    # Use threadpool to avoid blocking the event loop
+    result = await run_in_threadpool(whatsapp_connector.send_message, phone, message)
+    return result
+
+
+@app.get("/api/whatsapp/bridge-health")
+async def whatsapp_bridge_health():
+    """Health check for bridge runtime: Node, node_modules, Chrome, and bridge status."""
+    import shutil
+    node_available = False
+    node_version = None
+    node_modules = False
+    chrome_path = None
+    try:
+        node = shutil.which("node")
+        if node:
+            node_available = True
+            import subprocess
+            try:
+                out = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=3)
+                node_version = out.stdout.strip()
+            except Exception:
+                node_version = None
+    except Exception:
+        node_available = False
+
+    # check node_modules
+    try:
+        BRIDGE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "whatsapp-bridge"))
+        nm = os.path.join(BRIDGE_DIR, "node_modules")
+        node_modules = os.path.exists(nm)
+    except Exception:
+        node_modules = False
+
+    # Find Chrome/Edge
+    def _find_chrome():
+        candidates = [
+            os.getenv("CHROME_PATH"),
+            r"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+            r"C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+            r"C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+            r"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/chromium",
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        ]
+        for c in candidates:
+            try:
+                if c and os.path.exists(c):
+                    return c
+            except Exception:
+                continue
+        return None
+
+    chrome_path = _find_chrome()
+
+    # Bridge status
+    from whatsapp_connector import whatsapp_connector
+    status = whatsapp_connector.get_status()
+
+    return {
+        "node": {"available": node_available, "version": node_version},
+        "node_modules": node_modules,
+        "chrome_path": chrome_path,
+        "bridge_status": status,
+    }
+
+
+@app.post("/api/whatsapp/meta/test-send")
+async def whatsapp_meta_test_send(request: Request, user: User = Depends(get_current_user)):
+    """Send a test message via Meta Cloud API to verify credentials (requires auth)."""
+    body = await request.json()
+    phone = body.get("phone_number") or body.get("to") or ""
+    message = body.get("message", "Test message from platform")
+    if not phone:
+        raise HTTPException(status_code=400, detail="phone_number required")
+
+    # Use the internal helper to send via Meta Cloud (reads business profile tokens)
+    result = await _send_via_meta(phone, message, client_id=(user.client_id or 1))
+    return result
 
 
 # ---------------------------------------------------------------------------

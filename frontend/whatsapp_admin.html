@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WhatsApp Bridge Admin</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:20px}
+    .controls{display:flex;gap:8px;margin-bottom:12px}
+    button{padding:8px 12px}
+    .status{margin-top:12px;padding:12px;border:1px solid #ddd;border-radius:6px;background:#fafafa}
+    img.qr{max-width:320px;border:1px solid #ccc;padding:6px;background:#fff}
+    .small{font-size:90%;color:#666}
+  </style>
+</head>
+<body>
+  <h2>WhatsApp Bridge Admin</h2>
+  <div class="controls">
+    <button id="start">Start Bridge</button>
+    <button id="stop">Stop Bridge</button>
+    <button id="refresh">Refresh QR</button>
+    <button id="statusBtn">Get Status</button>
+  </div>
+
+  <div style="margin-top:12px;margin-bottom:12px">
+    <strong>Admin Login (for sending):</strong>
+    <input id="loginEmail" placeholder="email" style="margin-left:8px" />
+    <input id="loginPassword" placeholder="password" type="password" style="margin-left:8px" />
+    <button id="loginBtn">Login</button>
+    <button id="logoutBtn" style="display:none">Logout</button>
+    <span id="loginMsg" class="small" style="margin-left:8px"></span>
+  </div>
+
+  <div id="status" class="status">
+    <div><strong>Bridge status:</strong> <span id="bridgeState">unknown</span></div>
+    <div><strong>Connected:</strong> <span id="connected">false</span></div>
+    <div><strong>Phone:</strong> <span id="phone">-</span></div>
+    <div class="small">Bridge URL: <span id="bridgeUrl">/api/whatsapp/bridge</span></div>
+  </div>
+
+  <h3>QR Code</h3>
+  <div id="qrWrap">
+    <div id="qrMessage">QR not loaded</div>
+    <img id="qrImg" class="qr" src="" alt="QR image" style="display:none"/>
+  </div>
+
+  <h3>Send Test</h3>
+  <div>
+    <input id="testTo" placeholder="phone (e.g. 9198...)" />
+    <input id="testMessage" placeholder="message" value="Hello from bridge admin" style="width:360px" />
+    <button id="sendTest">Send</button>
+    <div id="sendResult" class="small"></div>
+  </div>
+
+  <h3>Meta Cloud (Save & Test)</h3>
+  <div>
+    <input id="metaToken" placeholder="Meta Access Token" style="width:420px" />
+    <input id="metaPhoneId" placeholder="Meta Phone Number ID" style="margin-left:8px" />
+    <button id="saveMeta">Save</button>
+    <button id="testMeta">Test Send</button>
+    <div id="metaResult" class="small"></div>
+  </div>
+
+  <h3>Saved Keys</h3>
+  <div id="keysArea" class="status small">
+    <div>WhatsApp API Key: <span id="wh_key">(not set)</span> <button id="showWhKey">Show</button></div>
+    <div>Telegram Token: <span id="tg_key">(not set)</span> <button id="showTgKey">Show</button></div>
+    <div id="keysMsg" class="small"></div>
+  </div>
+
+  <h3>Bridge Health</h3>
+  <div id="health" class="status small">Loading...</div>
+
+  <script src="/js/whatsapp_admin.js"></script>
+</body>
+</html>

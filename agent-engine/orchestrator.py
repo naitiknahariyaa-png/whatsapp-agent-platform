@@ -33,6 +33,11 @@ class IntentDetector:
 
     def __init__(self):
         self.llm = get_llm()
+        try:
+            from llm_setup import get_provider_status
+            self._provider_status = get_provider_status()
+        except ImportError:
+            self._provider_status = {}
 
     async def detect(self, message: str, history: List[Dict]) -> dict:
         """
@@ -160,6 +165,11 @@ class ResponseGenerator:
 
     def __init__(self):
         self.llm = get_llm()
+        try:
+            from llm_setup import get_provider_status
+            self._provider_status = get_provider_status()
+        except ImportError:
+            self._provider_status = {}
 
     async def generate(self, intent: str, message: str, history: List[Dict], 
                        contact: Optional[Dict] = None, vertical: str = "general") -> str:
