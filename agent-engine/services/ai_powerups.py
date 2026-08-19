@@ -702,11 +702,35 @@ class PromptManager:
         }
 
 
-# Global instances
-voice_processor = VoiceProcessor()
-image_analyzer = ImageAnalyzer()
-language_detector = LanguageDetector()
-sentiment_analyzer = SentimentAnalyzer()
-knowledge_base = KnowledgeBase()
+# Global instances (lazy-loaded via functions)
+def get_voice_processor():
+    """Get voice processor, lazily initialized"""
+    if not getattr(get_voice_processor, "_instance", None):
+        get_voice_processor._instance = VoiceProcessor()
+    return get_voice_processor._instance
+
+def get_image_analyzer():
+    """Get image analyzer, lazily initialized"""
+    if not getattr(get_image_analyzer, "_instance", None):
+        get_image_analyzer._instance = ImageAnalyzer()
+    return get_image_analyzer._instance
+
+def get_language_detector():
+    """Get language detector, lazily initialized"""
+    if not getattr(get_language_detector, "_instance", None):
+        get_language_detector._instance = LanguageDetector()
+    return get_language_detector._instance
+
+def get_sentiment_analyzer():
+    """Get sentiment analyzer, lazily initialized"""
+    if not getattr(get_sentiment_analyzer, "_instance", None):
+        get_sentiment_analyzer._instance = SentimentAnalyzer()
+    return get_sentiment_analyzer._instance
+
+def get_knowledge_base():
+    """Get knowledge base, lazily initialized"""
+    if not getattr(get_knowledge_base, "_instance", None):
+        get_knowledge_base._instance = KnowledgeBase()
+    return get_knowledge_base._instance
 conversation_exporter = ConversationExporter()
 prompt_manager = PromptManager()

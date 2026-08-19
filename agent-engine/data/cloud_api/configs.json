@@ -1,0 +1,16 @@
+{
+  "configs": [
+    {
+      "client_id": 1,
+      "access_token": "test_token",
+      "phone_number_id": "123456789",
+      "business_account_id": null,
+      "app_id": null,
+      "webhook_verify_token": null,
+      "is_active": true,
+      "tier": "tier_1",
+      "created_at": "2026-08-12T08:51:17.310974",
+      "updated_at": "2026-08-12T08:51:17.310992"
+    }
+  ]
+}

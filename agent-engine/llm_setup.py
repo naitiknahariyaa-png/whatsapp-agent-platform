@@ -197,8 +197,11 @@ def get_llm() -> BaseChatModel:
             return llm
 
     # Last resort: MockLLM
-    logger.warning("[!] No LLM provider available. Using MockLLM for testing.")
-    logger.warning("[!] Configure GROQ_API_KEY, Ollama, or OpenAI for full AI functionality.")
+    logger.error("===============================================================")
+    logger.error("[!!!] CRITICAL: No LLM provider available! [!!!]")
+    logger.error("You MUST configure GROQ_API_KEY in agent-engine/.env")
+    logger.error("Currently falling back to MockLLM which only answers with dummy responses.")
+    logger.error("===============================================================")
     return MockLLM()
 
 

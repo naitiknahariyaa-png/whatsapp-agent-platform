@@ -4,11 +4,18 @@ Phase 4: AI Power-Ups — Voice, Vision, Language, Sentiment, Knowledge Base
 import json
 import logging
 import os
+import re
+import sys
 import tempfile
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
 from enum import Enum
 from io import BytesIO
+
+# Ensure agent-engine is on the path for vector_store import
+_AGENT_ENGINE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "agent-engine"))
+if _AGENT_ENGINE_DIR not in sys.path:
+    sys.path.insert(0, _AGENT_ENGINE_DIR)
 
 logger = logging.getLogger("ai_powerups")
 
@@ -373,53 +380,26 @@ class SentimentAnalyzer:
 
 class KnowledgeBase:
     """
-    Upload docs → chunk → embed → store in Qdrant/Chroma
+    Upload docs → chunk → embed → store in ChromaDB (via vector_store.py)
     Query: embed query → search → LLM summary
     """
 
-    def __init__(self, collection_name: str = "knowledge_base"):
+    def __init__(self, collection_name: str = "knowledge"):
         self.collection_name = collection_name
         self._available = False
-        self._vector_client = None
-        self._embedding_func = None
 
     async def initialize(self):
-        """Initialize vector DB client"""
+        """Initialize vector DB client (ChromaDB via vector_store)"""
         try:
-            from qdrant_client import QdrantClient
-            from qdrant_client.http.models import Distance, VectorParams
-            import os
-
-            qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
-            self._vector_client = QdrantClient(url=qdrant_url)
-            self._available = True
-
-            # Create collection if not exists
-            collections = self._vector_client.get_collections()
-            if self.collection_name not in [c.name for c in collections.collections]:
-                self._vector_client.create_collection(
-                    collection_name=self.collection_name,
-                    vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
-                )
-            logger.info(f"[v] Knowledge base initialized: {self.collection_name}")
-        except ImportError:
-            logger.warning("qdrant-client not installed. Install with: pip install qdrant-client")
+            from vector_store import get_collection_stats
+            stats = get_collection_stats(0)
+            self._available = stats.get("available", False)
+            if self._available:
+                logger.info(f"[v] Knowledge base initialized: {self.collection_name}")
+            else:
+                logger.warning(f"Knowledge base not available: {stats.get('error', 'unknown')}")
         except Exception as e:
             logger.warning(f"Vector DB not available: {e}")
-
-    def _get_embedding(self, text: str) -> Optional[List[float]]:
-        """Get embedding via OpenAI"""
-        try:
-            from openai import OpenAI
-            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY", ""))
-            response = client.embeddings.create(
-                model="text-embedding-3-small",
-                input=text,
-            )
-            return response.data[0].embedding
-        except Exception as e:
-            logger.error(f"Embedding failed: {e}")
-            return None
 
     def _chunk_text(self, text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
         """Split text into overlapping chunks"""
@@ -431,62 +411,48 @@ class KnowledgeBase:
                 chunks.append(chunk)
         return chunks
 
-    async def add_document(self, doc_id: str, text: str, metadata: Optional[Dict] = None):
-        """Add a document to the knowledge base"""
-        if not self._available or not self._vector_client:
+    async def add_document(self, doc_id: str, text: str, metadata: Optional[Dict] = None,
+                           client_id: int = 0):
+        """Add a document to the knowledge base (ChromaDB)"""
+        if not self._available:
             return False
 
         try:
+            from vector_store import add_knowledge_item
             chunks = self._chunk_text(text)
-            from qdrant_client.http.models import PointStruct
-
-            points = []
+            added = 0
             for i, chunk in enumerate(chunks):
-                embedding = self._get_embedding(chunk)
-                if embedding:
-                    points.append(PointStruct(
-                        id=f"{doc_id}_{i}",
-                        vector=embedding,
-                        payload={
-                            "doc_id": doc_id,
-                            "chunk_index": i,
-                            "text": chunk,
-                            "metadata": metadata or {},
-                        },
-                    ))
-
-            if points:
-                self._vector_client.upsert(
-                    collection_name=self.collection_name,
-                    points=points,
+                meta = dict(metadata or {})
+                meta.update({"doc_id": doc_id, "chunk_index": i})
+                ids = add_knowledge_item(
+                    client_id=client_id,
+                    title=doc_id,
+                    content=chunk,
+                    category=meta.get("category", "general"),
+                    tags=meta.get("tags", []),
                 )
-                logger.info(f"[v] Added {len(points)} chunks from doc {doc_id}")
-                return True
+                if ids:
+                    added += 1
+            logger.info(f"[v] Added {added} chunks from doc {doc_id}")
+            return added > 0
         except Exception as e:
             logger.error(f"Failed to add document: {e}")
         return False
 
-    async def search(self, query: str, limit: int = 5) -> List[Dict]:
-        """Search the knowledge base"""
+    async def search(self, query: str, limit: int = 5, client_id: int = 0) -> List[Dict]:
+        """Search the knowledge base (ChromaDB)"""
         if not self._available:
             return []
 
-        embedding = self._get_embedding(query)
-        if not embedding:
-            return []
-
         try:
-            results = self._vector_client.search(
-                collection_name=self.collection_name,
-                query_vector=embedding,
-                limit=limit,
-            )
+            from vector_store import search_knowledge
+            results = search_knowledge(client_id, query, n_results=limit)
             return [
                 {
-                    "text": r.payload.get("text", ""),
-                    "score": r.score,
-                    "doc_id": r.payload.get("doc_id", ""),
-                    "metadata": r.payload.get("metadata", {}),
+                    "text": r.get("content", ""),
+                    "score": r.get("score", 0),
+                    "doc_id": r.get("metadata", {}).get("doc_id", ""),
+                    "metadata": r.get("metadata", {}),
                 }
                 for r in results
             ]
@@ -494,20 +460,18 @@ class KnowledgeBase:
             logger.error(f"Search failed: {e}")
             return []
 
-    async def delete_document(self, doc_id: str):
-        """Delete a document from the knowledge base"""
+    async def delete_document(self, doc_id: str, client_id: int = 0):
+        """Delete a document from the knowledge base (ChromaDB)"""
         if not self._available:
             return
         try:
-            from qdrant_client.http.models import Filter, FilterSelector
-            self._vector_client.delete(
-                collection_name=self.collection_name,
-                points_selector=FilterSelector(
-                    filter=Filter(
-                        must=[{"key": "doc_id", "match": {"value": doc_id}}]
-                    )
-                ),
-            )
+            from vector_store import search_knowledge
+            results = search_knowledge(client_id, doc_id, n_results=50)
+            ids = [r.get("metadata", {}).get("doc_id") for r in results if r.get("metadata", {}).get("doc_id") == doc_id]
+            if ids:
+                from vector_store import delete_documents
+                delete_documents(client_id, ids)
+                logger.info(f"[v] Deleted {len(ids)} chunks from doc {doc_id}")
         except Exception as e:
             logger.error(f"Delete failed: {e}")
 
@@ -702,11 +666,45 @@ class PromptManager:
         }
 
 
-# Global instances
-voice_processor = VoiceProcessor()
-image_analyzer = ImageAnalyzer()
-language_detector = LanguageDetector()
-sentiment_analyzer = SentimentAnalyzer()
-knowledge_base = KnowledgeBase()
-conversation_exporter = ConversationExporter()
-prompt_manager = PromptManager()
+# Global instances (lazy-loaded via functions) - SINGLE DEFINITION ONLY
+def get_voice_processor():
+    """Get voice processor, lazily initialized"""
+    if not getattr(get_voice_processor, "_instance", None):
+        get_voice_processor._instance = VoiceProcessor()
+    return get_voice_processor._instance
+
+def get_image_analyzer():
+    """Get image analyzer, lazily initialized"""
+    if not getattr(get_image_analyzer, "_instance", None):
+        get_image_analyzer._instance = ImageAnalyzer()
+    return get_image_analyzer._instance
+
+def get_language_detector():
+    """Get language detector, lazily initialized"""
+    if not getattr(get_language_detector, "_instance", None):
+        get_language_detector._instance = LanguageDetector()
+    return get_language_detector._instance
+
+def get_sentiment_analyzer():
+    """Get sentiment analyzer, lazily initialized"""
+    if not getattr(get_sentiment_analyzer, "_instance", None):
+        get_sentiment_analyzer._instance = SentimentAnalyzer()
+    return get_sentiment_analyzer._instance
+
+def get_knowledge_base():
+    """Get knowledge base, lazily initialized"""
+    if not getattr(get_knowledge_base, "_instance", None):
+        get_knowledge_base._instance = KnowledgeBase()
+    return get_knowledge_base._instance
+
+def get_conversation_exporter():
+    """Get conversation exporter, lazily initialized"""
+    if not getattr(get_conversation_exporter, "_instance", None):
+        get_conversation_exporter._instance = ConversationExporter()
+    return get_conversation_exporter._instance
+
+def get_prompt_manager():
+    """Get prompt manager, lazily initialized"""
+    if not getattr(get_prompt_manager, "_instance", None):
+        get_prompt_manager._instance = PromptManager()
+    return get_prompt_manager._instance

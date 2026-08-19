@@ -19,3 +19,9 @@ pyjwt
 cryptography
 passlib
 qrcode[pil]
+email-validator>=2.0.0
+arq[redis]
+alembic
+asyncpg
+psycopg2-binary
+python-json-logger

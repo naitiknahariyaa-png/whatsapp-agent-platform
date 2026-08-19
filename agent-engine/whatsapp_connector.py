@@ -125,20 +125,72 @@ class WhatsAppConnector:
 
     def _reconnect_loop(self):
         """Background loop that checks connection and reconnects if needed."""
+        consecutive_failures = 0
+        restart_times: list = []
         while not self._reconnect_stop.is_set():
             try:
                 time.sleep(30)
                 if self._reconnect_stop.is_set():
                     break
                 status = self.get_status()
-                if not status.get("connected") and status.get("bridge_online"):
+                if not self.is_running:
+                    print("[WhatsAppConnector] Bridge process stopped unexpectedly, restarting...")
+                    self._restart_bridge()
+                    continue
+                if status.get("bridge_online") and not status.get("connected"):
                     if self._connection_state in ("disconnected", "failed", "offline"):
                         print("[WhatsAppConnector] Auto-reconnecting...")
                         refresh_result = self.refresh_qr()
                         if refresh_result.get("status") == "refreshing":
                             print("[WhatsAppConnector] QR refresh initiated for reconnect")
+                if not status.get("bridge_online"):
+                    consecutive_failures += 1
+                else:
+                    consecutive_failures = 0
+                if consecutive_failures >= 2:
+                    print("[WhatsAppConnector] Health check failed 2x, restarting bridge...")
+                    self._restart_bridge()
+                    consecutive_failures = 0
             except Exception:
                 pass
+
+    def _restart_bridge(self):
+        """Kill and restart the bridge, track restart count and alert via Telegram."""
+        now = time.time()
+        self.restart_times = getattr(self, "restart_times", [])
+        self.restart_times = [t for t in self.restart_times if now - t < 600]
+        self.restart_times.append(now)
+        if len(self.restart_times) > 3:
+            self._alert_telegram("Bridge restarted >3 times in 10 minutes")
+        with self._lock:
+            if self.bridge_process and self.is_running:
+                self.bridge_process.terminate()
+                try:
+                    self.bridge_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.bridge_process.kill()
+                self.bridge_process = None
+            self._connected = False
+            self._connection_state = "disconnected"
+        start_result = self.start_bridge()
+        if start_result.get("status") == "started":
+            print("[WhatsAppConnector] Bridge restarted successfully")
+        else:
+            print(f"[WhatsAppConnector] Bridge restart failed: {start_result.get('message')}")
+
+    def _alert_telegram(self, message: str):
+        """Send alert via Telegram if configured."""
+        try:
+            from handoff import send_telegram_message
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(send_telegram_message(f"[Bridge Alert] {message}"))
+            finally:
+                loop.close()
+        except Exception:
+            pass
 
     def _monitor_bridge(self):
         """Monitor bridge output for QR codes and connection status."""
@@ -280,6 +332,30 @@ class WhatsAppConnector:
         except Exception as e:
             return {"status": "offline", "message": f"Bridge offline: {str(e)}"}
 
+    def reset_bridge(self) -> Dict:
+        self._reconnect_stop.set()
+        with self._lock:
+            if self.bridge_process and self.is_running:
+                try:
+                    self.bridge_process.terminate()
+                    self.bridge_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.bridge_process.kill()
+                self.bridge_process = None
+            self._connected = False
+            self._connection_state = "disconnected"
+            auth_dir = BRIDGE_DIR / ".wwebjs_auth"
+            try:
+                if auth_dir.exists():
+                    import shutil
+                    shutil.rmtree(auth_dir)
+                    print("[WhatsAppConnector] Cleared WhatsApp auth session")
+            except Exception as e:
+                print(f"[WhatsAppConnector] Failed to clear auth session: {e}")
+            self._reconnect_stop.clear()
+            result = self.start_bridge()
+            return {"status": "reset", "message": "Bridge session reset and restart requested", **result}
+
     def submit_verification_code(self, phone_number: str, code: str, method: str = "sms") -> Dict:
         try:
             resp = httpx.post(
@@ -297,6 +373,20 @@ class WhatsAppConnector:
     def send_message(self, to: str, message: str) -> Dict:
         try:
             resp = httpx.post(f"http://localhost:{BRIDGE_HTTP_PORT}/send", json={"to": to, "message": message}, timeout=15)
+            if resp.status_code == 200:
+                return resp.json()
+            return {"status": "error", "message": f"Bridge returned {resp.status_code}: {resp.text}"}
+        except Exception as e:
+            return {"status": "offline", "message": f"Bridge offline: {str(e)}"}
+
+    def send_image(self, to: str, image_url: str, caption: Optional[str] = None) -> Dict:
+        """Send an image with optional caption via the bridge."""
+        try:
+            resp = httpx.post(
+                f"http://localhost:{BRIDGE_HTTP_PORT}/send-image",
+                json={"to": to, "image_url": image_url, "caption": caption},
+                timeout=30,
+            )
             if resp.status_code == 200:
                 return resp.json()
             return {"status": "error", "message": f"Bridge returned {resp.status_code}: {resp.text}"}

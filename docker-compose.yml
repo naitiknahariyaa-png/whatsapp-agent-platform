@@ -1,0 +1,127 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wap-api
+    restart: always
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      - WAP_TERMINAL_MODE=1
+      - DATABASE_URL=sqlite+aiosqlite:///./wap_data.db
+      - REDIS_URL=redis://redis:6379/0
+      - WHATSAPP_BRIDGE_URL=http://whatsapp-bridge:3001
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER:-groq}
+      - LLM_MODEL=${LLM_MODEL:-llama-3.3-70b-versatile}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - WA_BRIDGE_SECRET=${WA_BRIDGE_SECRET:-wap_bridge_secret_2026}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./agent-engine:/app/agent-engine
+      - ./services:/app/services
+      - ./agent-engine/wap_data.db:/app/agent-engine/wap_data.db
+      - ./agent-engine/data:/app/agent-engine/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - wap-network
+
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wap-celery-worker
+    restart: always
+    command: celery -A services.celery_app worker --loglevel=info --concurrency=2 -E
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./wap_data.db
+      - REDIS_URL=redis://redis:6379/0
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER:-groq}
+      - LLM_MODEL=${LLM_MODEL:-llama-3.3-70b-versatile}
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    volumes:
+      - ./agent-engine:/app/agent-engine
+      - ./services:/app/services
+      - ./agent-engine/wap_data.db:/app/agent-engine/wap_data.db
+    networks:
+      - wap-network
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wap-celery-beat
+    restart: always
+    command: celery -A services.celery_app beat --loglevel=info
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./wap_data.db
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./agent-engine:/app/agent-engine
+      - ./services:/app/services
+    networks:
+      - wap-network
+
+  whatsapp-bridge:
+    build:
+      context: ./whatsapp-bridge
+      dockerfile: Dockerfile
+    container_name: wap-whatsapp-bridge
+    restart: always
+    ports:
+      - "127.0.0.1:3001:3001"
+    environment:
+      - HTTP_PORT=3001
+      - WS_PORT=3002
+      - AGENT_API_URL=http://api:8000
+      - WA_BRIDGE_SECRET=${WA_BRIDGE_SECRET:-wap_bridge_secret_2026}
+    volumes:
+      - ./whatsapp-bridge/.wwebjs_auth:/app/.wwebjs_auth
+      - ./whatsapp-bridge/.wwebjs_cache:/app/.wwebjs_cache
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - wap-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: wap-redis
+    restart: always
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - wap-network
+
+volumes:
+  redis_data:
+
+networks:
+  wap-network:
+    driver: bridge

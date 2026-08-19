@@ -259,37 +259,30 @@ class DripCampaignEngine:
             enrollment.status = "completed"
 
     async def process_enrollments(self):
-        """Process all active enrollments — called periodically"""
+        """Process all active enrollments — called periodically via ARQ"""
+        from arq_worker import enqueue_job
         for key, enrollment in list(self.enrollments.items()):
             if enrollment.status != "active":
                 continue
             try:
-                await self._execute_step(enrollment)
+                await enqueue_job("process_drip_step", key, enrollment.current_step_id)
             except Exception as e:
-                logger.error(f"Error processing enrollment {key}: {e}")
+                logger.error(f"Error enqueuing enrollment {key}: {e}")
                 enrollment.status = "paused"
 
     async def start(self, interval: float = 5.0):
-        """Start the campaign processing loop"""
+        """Start the campaign processing loop via ARQ."""
         self._running = True
-
-        async def _loop():
-            while self._running:
-                try:
-                    await self.process_enrollments()
-                except Exception as e:
-                    logger.error(f"Campaign engine error: {e}")
-                await asyncio.sleep(interval)
-
-        self._process_task = asyncio.create_task(_loop())
-        logger.info("[v] Drip campaign engine started")
+        try:
+            from arq_worker import enqueue_job
+            await enqueue_job("process_drip_enrollments")
+            logger.info("[v] Drip campaign engine started via ARQ")
+        except Exception as e:
+            logger.error(f"[!] Failed to start drip engine via ARQ: {e}")
 
     async def stop(self):
         """Stop the campaign engine"""
         self._running = False
-        if self._process_task:
-            self._process_task.cancel()
-            self._process_task = None
 
     def get_enrollment(self, campaign_id: str, contact_id: str) -> Optional[CampaignEnrollment]:
         """Get a specific enrollment"""
@@ -317,3 +310,19 @@ class DripCampaignEngine:
 
 # Global engine instance
 engine = DripCampaignEngine()
+
+
+async def process_drip_enrollments(ctx: dict):
+    """ARQ task: process enrollments and re-enqueue itself."""
+    if not engine._running:
+        return
+    try:
+        await engine.process_enrollments()
+    except Exception as e:
+        logger.error(f"Campaign engine ARQ error: {e}")
+    if engine._running:
+        try:
+            from arq_worker import enqueue_job
+            await enqueue_job("process_drip_enrollments", _defer_until=datetime.utcnow() + timedelta(seconds=5))
+        except Exception as e:
+            logger.error(f"Failed to re-enqueue drip processing: {e}")

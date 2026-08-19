@@ -22,9 +22,9 @@ import bcrypt
 from fastapi import Depends, HTTPException, status, Request, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import String, DateTime, Boolean, Integer, JSON
+from sqlalchemy import String, Text, DateTime, Boolean, Integer, JSON
 
 from db import Base, async_session, get_session
 from config import settings
@@ -90,6 +90,7 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     api_key: Mapped[Optional[str]] = mapped_column(String(100), unique=True, index=True)
     last_login: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    is_email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -105,6 +106,22 @@ class AuditLog(Base):
     ip_address: Mapped[Optional[str]] = mapped_column(String(50))
     user_agent: Mapped[Optional[str]] = mapped_column(String(500))
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class EmailVerification(Base):
+    """Email verification, OTP login, and password-reset tokens."""
+    __tablename__ = "email_verifications"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    token_hash: Mapped[str] = mapped_column(String(255), index=True)
+    purpose: Mapped[str] = mapped_column(String(50), default="email_verification")
+    # When purpose == "otp_login", the OTP code is stored hashed in otp_code_hash
+    otp_code_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -130,6 +147,46 @@ class RegisterRequest(BaseModel):
     full_name: str
     role: str = Role.CLIENT.value
     client_id: Optional[int] = None
+
+
+# -- Email / OTP auth schemas --
+
+class EmailVerifyRequest(BaseModel):
+    """Request a verification email be sent to this address."""
+    email: str
+
+
+class EmailVerifyConfirmRequest(BaseModel):
+    """Confirm email verification (for the link-based flow)."""
+    token: str
+
+
+class OTPRequest(BaseModel):
+    """Request a one-time password be sent to an email (passwordless login)."""
+    email: str
+
+
+class OTPVerifyRequest(BaseModel):
+    """Verify an OTP and return a JWT access token."""
+    email: str
+    otp: str
+
+
+class PasswordResetRequest(BaseModel):
+    """Request a password-reset link be sent to an email."""
+    email: str
+
+
+class PasswordResetConfirmRequest(BaseModel):
+    """Reset password using a reset token."""
+    token: str
+    password: str
+
+
+class PasswordChangeRequest(BaseModel):
+    """Change password for an authenticated user (requires current password)."""
+    current_password: str
+    new_password: str
 
 
 # ---------------------------------------------------------------------------

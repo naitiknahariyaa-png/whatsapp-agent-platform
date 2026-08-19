@@ -1,101 +1,220 @@
-"""
-Background scheduler — runs the drip-campaign engine loop and appointment reminders.
-
-Uses plain asyncio tasks (no external deps) started from the FastAPI lifespan.
-"""
 import asyncio
-from datetime import datetime, timedelta, timezone
+import logging
+import json
+from datetime import datetime, timezone, timedelta
+from typing import List, Dict, Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, update, func
+from db import async_session, Contact, Appointment, Conversation, Message, CompanyReport, QALog
+from agents.sales import SalesAgent
+from agents.manager import ManagerAgent
+from agents.qa_agent import QAAgent
+from llm_setup import get_llm
 
-from config import settings
-from logging_setup import get_logger
+logger = logging.getLogger(\"scheduler\")
 
-logger = get_logger("scheduler")
+# Configuration
+NUDGE_INTERVAL_HOURS = 4
+NUDGE_STALE_HOURS = 24
+MAX_NUDGES = 3
+APPT_CHECK_INTERVAL_MINS = 15
+REMINDER_WINDOW_HOURS = 24
 
-REMINDER_CHECK_INTERVAL = 60          # seconds between reminder sweeps
-REMINDER_LEAD_MINUTES = 60            # remind 1 hour before appointment
+class AutonomousWorkforce:
+    def __init__(self):
+        self.sales_agent = SalesAgent()
+        self.manager = ManagerAgent()
+        self.qa_agent = QAAgent()
+        self.llm = get_llm()
+        self._tasks = []
 
-_tasks: list = []
-
-
-async def _send_whatsapp(phone_number: str, message: str) -> bool:
-    """Send an outbound WhatsApp message via the bridge."""
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{settings.whatsapp_bridge_url}/send",
-                json={"to": phone_number, "message": message},
-                timeout=10,
-            )
-            return resp.status_code == 200
-    except Exception as e:
-        logger.warning(f"Bridge send failed for {phone_number}: {e}")
-        return False
-
-
-async def _appointment_reminder_loop():
-    """Every minute, find appointments starting within the lead window and remind."""
-    from db import async_session, Appointment
-
-    reminded: set = set()  # appointment ids already reminded this process
-    while True:
+    async def _send_whatsapp(self, phone: str, message: str):
         try:
-            now = datetime.now(timezone.utc)
-            today = now.strftime("%Y-%m-%d")
-            async with async_session() as session:
-                result = await session.execute(
-                    select(Appointment).where(
-                        Appointment.status == "scheduled",
-                        Appointment.appointment_date == today,
-                    )
+            from config import settings
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f\"{settings.whatsapp_bridge_url}/send\",
+                    json={\"to\": phone, \"message\": message},
+                    timeout=10
                 )
-                for appt in result.scalars().all():
-                    if appt.id in reminded or not appt.appointment_time:
-                        continue
-                    try:
-                        appt_dt = datetime.strptime(
-                            f"{appt.appointment_date} {appt.appointment_time}", "%Y-%m-%d %H:%M"
-                        ).replace(tzinfo=timezone.utc)
-                    except ValueError:
-                        continue
-                    minutes_away = (appt_dt - now).total_seconds() / 60
-                    if 0 < minutes_away <= REMINDER_LEAD_MINUTES:
-                        msg = (f"⏰ Reminder: you have an appointment"
-                               f"{' — ' + appt.title if appt.title else ''} "
-                               f"at {appt.appointment_time} today.")
-                        if await _send_whatsapp(appt.phone_number, msg):
-                            reminded.add(appt.id)
-                            logger.info(f"Sent reminder for appointment {appt.id}")
+                return resp.status_code == 200
         except Exception as e:
-            logger.error(f"Reminder loop error: {e}")
-        await asyncio.sleep(REMINDER_CHECK_INTERVAL)
+            logger.error(f\"Outbound send failed for {phone}: {e}\")
+            return False
 
+    async def lead_nurture_loop(self):
+        while True:
+            try:
+                logger.info(\"Running Lead Nurture Loop...\")
+                async with async_session() as session:
+                    stale_time = datetime.now(timezone.utc) - timedelta(hours=NUDGE_STALE_HOURS)
+                    result = await session.execute(
+                        select(Contact).where(
+                            Contact.lead_status == \"contacted\",
+                            Contact.updated_at < stale_time
+                        )
+                    )
+                    leads = result.scalars().all()
 
-async def start_scheduler():
-    """Start all background loops. Call from FastAPI lifespan."""
-    # 1. Drip campaign engine loop (uses its own start())
-    try:
-        from drip_campaigns import engine as drip_engine
-        await drip_engine.start(interval=5.0)
-        logger.info("[v] Drip campaign engine loop started")
-    except Exception as e:
-        logger.warning(f"Drip engine not started: {e}")
+                    for lead in leads:
+                        history = await self._get_recent_messages(session, lead.phone_number)
+                        if any(word in history.lower() for word in [\"stop\", \"unsubscribe\", \"opt out\"]):
+                            lead.lead_status = \"unsubscribed\"
+                            continue
 
-    # 2. Appointment reminders
-    _tasks.append(asyncio.create_task(_appointment_reminder_loop()))
-    logger.info("[v] Appointment reminder loop started")
+                        fields = lead.custom_fields or {}
+                        nudge_count = fields.get(\"nudge_count\", 0)
+                        if nudge_count >= MAX_NUDGES:
+                            lead.lead_status = \"cold\"
+                            continue
 
+                        if await self._has_user_replied_recently(session, lead.phone_number):
+                            continue
 
-async def stop_scheduler():
-    """Cancel background loops. Call from FastAPI lifespan shutdown."""
-    try:
-        from drip_campaigns import engine as drip_engine
-        await drip_engine.stop()
-    except Exception:
-        pass
-    for t in _tasks:
-        t.cancel()
-    _tasks.clear()
-    logger.info("[i] Scheduler stopped")
+                        nudge_prompt = (
+                            f\"Lead {lead.name} ({lead.phone_number}) is stale. \"
+                            f\"Known facts: {json.dumps(fields)}. \"
+                            \"Generate a short, friendly, personalized nudge to restart the conversation.\"
+                        )
+                        nudge_msg = await self.sales_agent.run(nudge_prompt)
+
+                        if await self._send_whatsapp(lead.phone_number, nudge_msg):
+                            fields[\"nudge_count\"] = nudge_count + 1
+                            lead.custom_fields = fields
+                            lead.updated_at = datetime.now(timezone.utc)
+                    await session.commit()
+            except Exception as e:
+                logger.error(f\"Lead Nurture Loop error: {e}\", exc_info=True)
+            await asyncio.sleep(NUDGE_INTERVAL_HOURS * 3600)
+
+    async def _get_recent_messages(self, session, phone: str) -> str:
+        res = await session.execute(
+            select(Message).where(Message.phone_number == phone).order_by(Message.created_at.desc()).limit(5)
+        )
+        msgs = res.scalars().all()
+        return \" \".join([m.content or \"\" for m in msgs])
+
+    async def _has_user_replied_recently(self, session, phone: str) -> bool:
+        res = await session.execute(
+            select(Message).where(Message.phone_number == phone).order_by(Message.created_at.desc()).limit(1)
+        )
+        last = res.scalar_one_or_none()
+        return last and last.direction == \"incoming\"
+
+    async def appointment_guard_loop(self):
+        while True:
+            try:
+                logger.info(\"Running Appointment Guard Loop...\")
+                now = datetime.now(timezone.utc)
+                async with async_session() as session:
+                    tomorrow = (now + timedelta(hours=REMINDER_WINDOW_HOURS)).strftime(\"%Y-%m-%d\")
+                    result = await session.execute(
+                        select(Appointment).where(
+                            Appointment.status == \"scheduled\",
+                            Appointment.appointment_date == tomorrow.split('T')[0]
+                        )
+                    )
+                    for appt in result.scalars().all():
+                        await self._send_whatsapp(appt.phone_number, f\"Reminder: {appt.title} at {appt.appointment_time} tomorrow!\")
+
+                    today_str = now.strftime(\"%Y-%m-%d\")
+                    past_appts = await session.execute(
+                        select(Appointment).where(
+                            Appointment.appointment_date == today_str,
+                            Appointment.status == \"scheduled\"
+                        )
+                    )
+                    for appt in past_appts.scalars():
+                        appt_time = datetime.strptime(appt.appointment_time, \"%H:%M\").replace(
+                            year=now.year, month=now.month, day=now.day, tzinfo=timezone.utc
+                        )
+                        if now > appt_time + timedelta(minutes=30):
+                            appt.status = \"no-show\"
+                            await self._send_whatsapp(appt.phone_number, \"We missed you! Want to reschedule?\")
+                    await session.commit()
+            except Exception as e:
+                logger.error(f\"Appointment Guard Loop error: {e}\", exc_info=True)
+            await asyncio.sleep(APPT_CHECK_INTERVAL_MINS * 60)
+
+    async def weekly_ceo_report(self):
+        while True:
+            now = datetime.now(timezone.utc)
+            if now.weekday() == 6 and now.hour == 23 and now.minute == 0:
+                try:
+                    logger.info(\"Generating Weekly CEO Report...\")
+                    async with async_session() as session:
+                        last_week = now - timedelta(days=7)
+                        lead_count = (await session.execute(select(func.count(Contact.id)).where(Contact.created_at > last_week))).scalar()
+                        msg_count = (await session.execute(select(func.count(Message.id)).where(Message.created_at > last_week))).scalar()
+                        conv_count = (await session.execute(select(func.count(Contact.id)).where(Contact.lead_status == \"converted\", Contact.created_at > last_week))).scalar()
+                        conv_rate = (conv_count / lead_count * 100) if lead_count > 0 else 0
+                        
+                        metrics = {\"total_leads\": lead_count, \"total_messages\": msg_count, \"conversion_rate\": f\"{round(conv_rate, 2)}%\"}
+                        
+                        res = await session.execute(select(Message.content).where(Message.direction == \"incoming\", Message.created_at > last_week).limit(100))
+                        logs = \"\\n\".join([r[0] for r in res.all() if r[0]])
+                        
+                        summary_prompt = f\"Analyze these logs and identify: Most asked question, Top drop-off point, and General sentiment. Logs:\\n{logs}\"
+                        summary = await self.llm.ainvoke([{\"role\": \"user\", \"content\": summary_prompt}])
+                        summary_text = summary.content if hasattr(summary, 'content') else str(summary)
+                        
+                        report = CompanyReport(client_id=1, metrics=metrics, summary=summary_text, drop_off_point=\"Analyzed in summary\")
+                        session.add(report)
+                        await session.commit()
+                        await self._send_whatsapp(\"OWNER_PHONE_NUMBER\", f\"📊 Weekly Report:\\n\\n{json.dumps(metrics, indent=2)}\\n\\nAnalysis:\\n{summary_text}\")
+                except Exception as e:
+                    logger.error(f\"Weekly Report error: {e}\", exc_info=True)
+            await asyncio.sleep(3600)
+
+    async def quality_assurance_loop(self):
+        \"\"\"
+        Sample a random % of conversations and have the QAAgent grade them.
+        Catches silent regressions in tone and accuracy.
+        \"\"\"
+        while True:
+            now = datetime.now(timezone.utc)
+            if now.weekday() == 0 and now.hour == 1 and now.minute == 0:
+                try:
+                    logger.info(\"Running QA Conversation Grading...\")
+                    async with async_session() as session:
+                        res = await session.execute(select(Conversation).limit(50))
+                        convs = res.scalars().all()
+                        
+                        for conv in convs:
+                            history_res = await session.execute(
+                                select(Message).where(Message.conversation_id == conv.id).order_by(Message.created_at.asc())
+                            )
+                            msgs = history_res.scalars().all()
+                            history_text = \"\\n\".join([f\"{m.direction}: {m.content}\" for m in msgs])
+                            
+                            # Use the specialized QAAgent
+                            grade_data = await self.qa_agent.grade_conversation(history_text)
+                            
+                            from db import QALog
+                            qa_log = QALog(
+                                conversation_id=conv.id,
+                                client_id=conv.client_id,
+                                grade=grade_data.get(\"grade\", 0.0),
+                                feedback=grade_data.get(\"feedback\", \"\"),
+                                rag_used_correctly=grade_data.get(\"rag_correct\", True),
+                                escalation_missed=grade_data.get(\"escalation_missed\", False)
+                            )
+                            session.add(qa_log)
+                        await session.commit()
+                except Exception as e:
+                    logger.error(f\"QA Loop error: {e}\", exc_info=True)
+            await asyncio.sleep(3600)
+
+    async def start(self):
+        self._tasks = [
+            asyncio.create_task(self.lead_nurture_loop()),
+            asyncio.create_task(self.appointment_guard_loop()),
+            asyncio.create_task(self.weekly_ceo_report()),
+            asyncio.create_task(self.quality_assurance_loop())
+        ]
+        logger.info(\"🚀 Autonomous Workforce started: Nurture, Guard, CEO Report, and QA loops are active.\")
+
+    async def stop(self):
+        for t in self._tasks: t.cancel()
+        logger.info(\"Autonomous Workforce stopped.\")

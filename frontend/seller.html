@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Seller CRM — Amazon & Flipkart</title>
+<style>
+:root { --primary:#25D366; --secondary:#128C7E; --bg:#f8fafc; --surface:#fff; --text:#1e293b; --text-light:#64748b; --border:#e2e8f0; --amazon:#FF9900; --flipkart:#2874F0; --radius:12px; --shadow:0 1px 3px rgba(0,0,0,0.1); }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); }
+.header { background:var(--surface); border-bottom:1px solid var(--border); padding:16px 24px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:100; }
+.header h1 { font-size:20px; font-weight:700; }
+.nav { display:flex; gap:8px; }
+.nav a { padding:8px 16px; border-radius:8px; text-decoration:none; color:var(--text-light); font-size:14px; font-weight:500; transition:all .2s; }
+.nav a:hover, .nav a.active { background:var(--bg); color:var(--primary); }
+.container { max-width:1200px; margin:0 auto; padding:24px; }
+.stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; margin-bottom:24px; }
+.stat-card { background:var(--surface); border-radius:var(--radius); padding:20px; box-shadow:var(--shadow); border:1px solid var(--border); }
+.stat-card h3 { font-size:13px; color:var(--text-light); text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px; }
+.stat-card .value { font-size:28px; font-weight:700; }
+.card { background:var(--surface); border-radius:var(--radius); padding:20px; box-shadow:var(--shadow); border:1px solid var(--border); margin-bottom:20px; }
+.card h2 { font-size:18px; font-weight:700; margin-bottom:16px; }
+table { width:100%; border-collapse:collapse; }
+th,td { text-align:left; padding:12px; border-bottom:1px solid var(--border); font-size:14px; }
+th { color:var(--text-light); font-weight:600; text-transform:uppercase; font-size:12px; letter-spacing:.5px; }
+.badge { display:inline-block; padding:4px 10px; border-radius:20px; font-size:12px; font-weight:600; }
+.badge-amazon { background:#FFF3E0; color:var(--amazon); }
+.badge-flipkart { background:#E3F2FD; color:var(--flipkart); }
+.btn { background:var(--primary); color:#fff; border:none; padding:10px 20px; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
+.btn:hover { background:var(--secondary); }
+.btn-secondary { background:var(--bg); color:var(--text); border:1px solid var(--border); }
+.section { display:none; }
+.section.active { display:block; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>Seller CRM</h1>
+  <nav class="nav">
+    <a href="#" class="nav-link active" data-section="dashboard">Dashboard</a>
+    <a href="#" class="nav-link" data-section="products">Products</a>
+    <a href="#" class="nav-link" data-section="listings">Listings</a>
+    <a href="#" class="nav-link" data-section="orders">Orders</a>
+    <a href="#" class="nav-link" data-section="prices">Prices</a>
+    <a href="#" class="nav-link" data-section="alerts">Alerts</a>
+  </nav>
+</div>
+
+<div class="container">
+  <div id="dashboard" class="section active">
+    <div class="stats-grid">
+      <div class="stat-card"><h3>Products</h3><div class="value" id="dash-products">-</div></div>
+      <div class="stat-card"><h3>Listings</h3><div class="value" id="dash-listings">-</div></div>
+      <div class="stat-card"><h3>Orders</h3><div class="value" id="dash-orders">-</div></div>
+      <div class="stat-card"><h3>Pending Orders</h3><div class="value" id="dash-pending">-</div></div>
+      <div class="stat-card"><h3>Revenue</h3><div class="value" id="dash-revenue">-</div></div>
+      <div class="stat-card"><h3>Avg SEO Score</h3><div class="value" id="dash-seo">-</div></div>
+      <div class="stat-card"><h3>Price Alerts</h3><div class="value" id="dash-alerts">-</div></div>
+    </div>
+  </div>
+
+  <div id="products" class="section">
+    <div class="card">
+      <h2>Products</h2>
+      <button class="btn" onclick="showAddProduct()">+ Add Product</button>
+      <div id="product-form" style="display:none; margin-top:16px;">
+        <input type="text" id="p-sku" placeholder="SKU *" style="width:100%;padding:10px;margin-bottom:8px;border:1px solid var(--border);border-radius:8px;">
+        <input type="text" id="p-name" placeholder="Product Name *" style="width:100%;padding:10px;margin-bottom:8px;border:1px solid var(--border);border-radius:8px;">
+        <input type="text" id="p-category" placeholder="Category" style="width:100%;padding:10px;margin-bottom:8px;border:1px solid var(--border);border-radius:8px;">
+        <input type="number" id="p-cogs" placeholder="COGS" step="0.01" style="width:100%;padding:10px;margin-bottom:8px;border:1px solid var(--border);border-radius:8px;">
+        <button class="btn" onclick="addProduct()">Save</button>
+        <button class="btn btn-secondary" onclick="document.getElementById('product-form').style.display='none'">Cancel</button>
+      </div>
+      <table id="products-table"><thead><tr><th>SKU</th><th>Name</th><th>Category</th><th>COGS</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <div id="listings" class="section">
+    <div class="card">
+      <h2>Listings</h2>
+      <select id="listing-platform" onchange="loadListings()" style="padding:8px;border-radius:8px;border:1px solid var(--border);margin-bottom:12px;">
+        <option value="">All Platforms</option><option value="amazon">Amazon</option><option value="flipkart">Flipkart</option>
+      </select>
+      <table id="listings-table"><thead><tr><th>Platform</th><th>Listing ID</th><th>Title</th><th>Price</th><th>Stock</th><th>SEO</th><th>Action</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <div id="orders" class="section">
+    <div class="card">
+      <h2>Orders</h2>
+      <select id="order-platform" onchange="loadOrders()" style="padding:8px;border-radius:8px;border:1px solid var(--border);margin-bottom:12px;">
+        <option value="">All Platforms</option><option value="amazon">Amazon</option><option value="flipkart">Flipkart</option>
+      </select>
+      <select id="order-status" onchange="loadOrders()" style="padding:8px;border-radius:8px;border:1px solid var(--border);margin-bottom:12px;">
+        <option value="">All Status</option><option value="pending">Pending</option><option value="confirmed">Confirmed</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option>
+      </select>
+      <table id="orders-table"><thead><tr><th>Order ID</th><th>Platform</th><th>Customer</th><th>Qty</th><th>Total</th><th>Status</th><th>Date</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <div id="prices" class="section">
+    <div class="card">
+      <h2>Price Alerts</h2>
+      <div id="alerts-list"></div>
+    </div>
+    <div class="card">
+      <h2>Price History</h2>
+      <div id="price-history"></div>
+    </div>
+  </div>
+
+  <div id="alerts" class="section">
+    <div class="card">
+      <h2>Active Price Alerts</h2>
+      <div id="all-alerts"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '/api/seller';
+async function api(path, opts={}) { const r = await fetch(API+path, {headers:{'Content-Type':'application/json'}, ...opts}); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+
+document.querySelectorAll('.nav-link').forEach(a => a.addEventListener('click', e => {
+  e.preventDefault();
+  document.querySelectorAll('.nav-link').forEach(n => n.classList.remove('active'));
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  a.classList.add('active');
+  document.getElementById(a.dataset.section).classList.add('active');
+  if(a.dataset.section==='dashboard') loadDashboard();
+  if(a.dataset.section==='products') loadProducts();
+  if(a.dataset.section==='listings') loadListings();
+  if(a.dataset.section==='orders') loadOrders();
+  if(a.dataset.section==='prices') loadPrices();
+  if(a.dataset.section==='alerts') loadAlerts();
+}));
+
+async function loadDashboard() {
+  const d = await api('/dashboard');
+  document.getElementById('dash-products').textContent = d.total_products;
+  document.getElementById('dash-listings').textContent = d.total_listings;
+  document.getElementById('dash-orders').textContent = d.total_orders;
+  document.getElementById('dash-pending').textContent = d.pending_orders;
+  document.getElementById('dash-revenue').textContent = '₹'+d.total_revenue.toLocaleString();
+  document.getElementById('dash-seo').textContent = d.avg_seo_score+'%';
+  document.getElementById('dash-alerts').textContent = d.price_alerts;
+}
+
+async function loadProducts() {
+  const data = await api('/products');
+  const tbody = document.querySelector('#products-table tbody');
+  tbody.innerHTML = data.products.map(p => `<tr><td>${p.sku}</td><td>${p.name}</td><td>${p.category||'-'}</td><td>₹${p.cogs.toFixed(2)}</td></tr>`).join('');
+}
+
+function showAddProduct() { document.getElementById('product-form').style.display='block'; }
+async function addProduct() {
+  const body = { sku: document.getElementById('p-sku').value, name: document.getElementById('p-name').value, category: document.getElementById('p-category').value, cogs: parseFloat(document.getElementById('p-cogs').value)||0 };
+  await api('/products', {method:'POST', body:JSON.stringify(body)});
+  document.getElementById('product-form').style.display='none';
+  loadProducts();
+}
+
+async function loadListings() {
+  const platform = document.getElementById('listing-platform').value;
+  const data = await api(`/listings?platform=${platform}`);
+  const tbody = document.querySelector('#listings-table tbody');
+  tbody.innerHTML = data.listings.map(l => `<tr>
+    <td><span class="badge badge-${l.platform}">${l.platform}</span></td>
+    <td>${l.listing_id}</td><td>${l.title}</td><td>₹${l.price.toFixed(2)}</td><td>${l.stock}</td>
+    <td>${l.seo_score.toFixed(1)}</td>
+    <td><button class="btn btn-sm" onclick="auditListing(${l.id})">Audit</button></td>
+  </tr>`).join('');
+}
+
+async function auditListing(id) {
+  const res = await api(`/listings/${id}/audit`, {method:'POST'});
+  alert('SEO Score: '+res.score+'/100\nIssues: '+res.issues.join(', '));
+  loadListings();
+}
+
+async function loadOrders() {
+  const platform = document.getElementById('order-platform').value;
+  const status = document.getElementById('order-status').value;
+  const data = await api(`/orders?platform=${platform}&status=${status}`);
+  const tbody = document.querySelector('#orders-table tbody');
+  tbody.innerHTML = data.orders.map(o => `<tr>
+    <td>${o.order_id}</td>
+    <td><span class="badge badge-${o.platform}">${o.platform}</span></td>
+    <td>${o.customer_name||'-'}</td><td>${o.quantity}</td><td>₹${o.total.toFixed(2)}</td>
+    <td>${o.status}</td><td>${new Date(o.created_at).toLocaleDateString()}</td>
+  </tr>`).join('');
+}
+
+async function loadPrices() {
+  const hist = await api('/prices/history?days=30');
+  document.getElementById('price-history').innerHTML = hist.history.slice(0,20).map(h => `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:14px;">
+    <span>Product #${h.product_id} (${h.platform})</span>
+    <span>₹${h.my_price} vs ₹${h.competitor_price} <span style="color:${h.delta>0?'green':'red'}">${h.delta>0?'+':''}${h.delta}</span></span>
+  </div>`).join('');
+  const alerts = await api('/alerts?resolved=false');
+  document.getElementById('alerts-list').innerHTML = alerts.alerts.length ? alerts.alerts.map(a => `<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;">
+    <strong>${a.alert_type}</strong> — ${a.message}<br><small>₹${a.my_price} vs ₹${a.competitor_price}</small>
+    <button class="btn btn-sm" onclick="resolveAlert(${a.id})">Resolve</button>
+  </div>`).join('') : '<p>No active alerts</p>';
+}
+
+async function loadAlerts() {
+  const data = await api('/alerts?resolved=false');
+  document.getElementById('all-alerts').innerHTML = data.alerts.length ? data.alerts.map(a => `<div style="padding:16px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">
+    <div>
+      <strong>${a.alert_type}</strong> <span class="badge badge-${a.platform}">${a.platform}</span>
+      <p style="color:var(--text-light);margin-top:4px;">${a.message}</p>
+      <small>₹${a.my_price} vs ₹${a.competitor_price}</small>
+    </div>
+    <button class="btn btn-sm" onclick="resolveAlert(${a.id})">Resolve</button>
+  </div>`).join('') : '<p>No active alerts</p>';
+}
+
+async function resolveAlert(id) { await api(`/alerts/${id}/resolve`, {method:'PUT'}); loadAlerts(); loadPrices(); }
+
+loadDashboard();
+</script>
+</body>
+</html>

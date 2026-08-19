@@ -242,7 +242,7 @@ async def notify_owner_via_whatsapp(business: Dict[str, Any], booking_data: Dict
     intent = booking_data.get("intent", "booking_request")
     extracted = booking_data.get("extracted", {})
 
-    lines = [f"🔔 New {intent.replace('_', ' ')} via web chat!"]
+    lines = [f"New {intent.replace('_', ' ')} via web chat!"]
     lines.append(f"Business: {biz_name}")
     if extracted.get("customer_name"):
         lines.append(f"Customer: {extracted['customer_name']}")
@@ -262,6 +262,10 @@ async def notify_owner_via_whatsapp(business: Dict[str, Any], booking_data: Dict
     message = "\n".join(lines)
 
     try:
+        from outbound_limiter import check_can_send, record_send
+        if not check_can_send(owner_phone):
+            logger.warning("[!] Owner WhatsApp notification rate limited for %s", owner_phone)
+            return False
         import httpx
         bridge_url = settings.whatsapp_bridge_url or "http://localhost:3001"
         async with httpx.AsyncClient(timeout=15) as client:
@@ -269,7 +273,10 @@ async def notify_owner_via_whatsapp(business: Dict[str, Any], booking_data: Dict
                 f"{bridge_url}/send",
                 json={"to": owner_phone, "message": message},
             )
-            return resp.status_code == 200
+            if resp.status_code == 200:
+                record_send(owner_phone)
+                return True
+            return False
     except Exception as e:
         logger.warning("[!] Owner WhatsApp notification failed: %s", e)
         return False

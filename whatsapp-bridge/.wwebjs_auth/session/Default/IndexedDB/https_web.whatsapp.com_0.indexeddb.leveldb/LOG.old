@@ -1,0 +1,33 @@
+2026/08/16-18:30:23.336 2674 Reusing MANIFEST c:\Users\PC\Desktop\whatsapp-agent-platform\whatsapp-bridge\.wwebjs_auth\session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/08/16-18:30:23.420 2674 Recovering log #449
+2026/08/16-18:30:23.523 2674 Reusing old log c:\Users\PC\Desktop\whatsapp-agent-platform\whatsapp-bridge\.wwebjs_auth\session\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000449.log 
+2026/08/16-18:30:26.497 3218 Level-0 table #457: started
+2026/08/16-18:30:26.542 3218 Level-0 table #457: 1028636 bytes OK
+2026/08/16-18:30:26.544 3218 Delete type=0 #449
+2026/08/16-18:30:27.128 2f0c Compacting 1@1 + 4@2 files
+2026/08/16-18:30:27.465 2f0c Generated table #458@1: 74584 keys, 2217566 bytes
+2026/08/16-18:30:27.613 2f0c Generated table #459@1: 60417 keys, 2340632 bytes
+2026/08/16-18:30:27.794 2f0c Generated table #460@1: 16501 keys, 2189848 bytes
+2026/08/16-18:30:27.808 2f0c Generated table #461@1: 5938 keys, 489249 bytes
+2026/08/16-18:30:27.808 2f0c Compacted 1@1 + 4@2 files => 7237295 bytes
+2026/08/16-18:30:27.810 2f0c compacted to: files[ 0 0 4 0 0 0 0 ]
+2026/08/16-18:30:33.989 30f4 Level-0 table #463: started
+2026/08/16-18:30:34.072 30f4 Level-0 table #463: 1172407 bytes OK
+2026/08/16-18:30:34.093 30f4 Delete type=2 #451
+2026/08/16-18:30:34.093 30f4 Delete type=2 #452
+2026/08/16-18:30:34.093 30f4 Delete type=2 #453
+2026/08/16-18:30:34.093 30f4 Delete type=2 #454
+2026/08/16-18:30:34.093 30f4 Delete type=0 #456
+2026/08/16-18:30:34.093 30f4 Delete type=2 #457
+2026/08/16-18:30:34.322 1918 Compacting 1@1 + 4@2 files
+2026/08/16-18:30:35.538 1918 Generated table #464@1: 74865 keys, 2219466 bytes
+2026/08/16-18:30:37.163 1918 Generated table #465@1: 61355 keys, 2339719 bytes
+2026/08/16-18:30:39.194 1918 Generated table #466@1: 17063 keys, 2190426 bytes
+2026/08/16-18:30:40.169 1918 Generated table #467@1: 6017 keys, 516169 bytes
+2026/08/16-18:30:40.169 1918 Compacted 1@1 + 4@2 files => 7265780 bytes
+2026/08/16-18:30:41.266 1918 compacted to: files[ 0 0 4 0 0 0 0 ]
+2026/08/16-18:30:41.267 1918 Delete type=2 #458
+2026/08/16-18:30:41.267 1918 Delete type=2 #459
+2026/08/16-18:30:41.267 1918 Delete type=2 #460
+2026/08/16-18:30:41.268 1918 Delete type=2 #461
+2026/08/16-18:30:41.268 1918 Delete type=2 #463

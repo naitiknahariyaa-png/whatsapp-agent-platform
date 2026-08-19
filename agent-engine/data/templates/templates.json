@@ -1,0 +1,22 @@
+{
+  "templates": [
+    {
+      "id": "c5e0e07fbd85",
+      "client_id": 1,
+      "name": "Welcome",
+      "category": "welcome",
+      "content": "Hello {{name}}, welcome to {{business_name}}!",
+      "variables": [
+        "business_name",
+        "name"
+      ],
+      "language": "en",
+      "status": "draft",
+      "meta_template_id": null,
+      "rejection_reason": null,
+      "tags": [],
+      "created_at": "2026-08-12T08:50:24.230404",
+      "updated_at": "2026-08-12T08:50:24.230416"
+    }
+  ]
+}

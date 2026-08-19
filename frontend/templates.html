@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Template Browser — WhatsApp Agent Platform</title>
+<style>
+:root {
+  --primary: #3a5343;
+  --secondary: #469188;
+  --bg: #f0f0f8;
+  --surface: #25255a;
+  --surface2: #1a1a24;
+  --text: #e8e8f0;
+  --text-light: #8a8a9a;
+  --border: #2a2a35;
+  --gradient: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+  --shadow: 0 2px 12px rgba(0,0,0,0.3);
+  --radius: 12px;
+  --transition: all 0.2s ease;
+  --danger: #ff1010;
+  --warning: #ffd93d;
+  --info: #4fc3f7;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+.header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+.header h1 { font-size: 18px; font-weight: 700; color: var(--primary); }
+.header a { color: var(--text-light); text-decoration: none; font-size: 13px; }
+.header a:hover { color: var(--primary); }
+.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+.page-subtitle { color: var(--text-light); font-size: 14px; margin-bottom: 24px; }
+.type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.type-card { border: 2px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; cursor: pointer; transition: var(--transition); background: var(--surface2); }
+.type-card:hover { border-color: var(--primary); transform: translateY(-2px); }
+.type-card.selected { border-color: var(--primary); background: rgba(37,211,102,0.1); }
+.type-icon { font-size: 36px; margin-bottom: 8px; }
+.type-name { font-size: 13px; font-weight: 600; }
+.card { background: var(--surface); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); margin-bottom: 20px; border: 1px solid var(--border); }
+.card-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; }
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text-light); }
+.form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px 14px; border: 2px solid var(--border); border-radius: 10px; font-size: 14px; outline: none; transition: var(--transition); background: var(--surface2); color: var(--text); }
+.form-group input:focus, .form-group textarea:focus, .form-group select:focus { border-color: var(--primary); }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.btn { background: var(--gradient); color: #fff; border: none; padding: 10px 24px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: var(--transition); }
+.btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(37,211,102,0.3); }
+.btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+.btn-sm { padding: 6px 14px; font-size: 12px; }
+.btn-secondary.btn-sm { padding: 6px 14px; font-size: 12px; }
+.badge { padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+.badge-wip { background: #3a1a00; color: #ff8a50; }
+.template-card { border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 12px; background: var(--surface2); cursor: pointer; transition: var(--transition); }
+.template-card:hover { border-color: var(--primary); background: var(--surface); }
+.template-card.selected { border-color: var(--primary); background: var(--surface); }
+.template-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; }
+.template-category { font-size: 11px; color: var(--text-light); text-transform: uppercase; letter-spacing: 0.5px; }
+.template-content { font-size: 12px; color: var(--text-light); margin-top: 8px; line-height: 1.6; font-family: monospace; white-space: pre-wrap; max-height: 120px; overflow: hidden; }
+.variable-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.variable-tag { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 2px 10px; font-size: 11px; color: var(--text-light); }
+.preview-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; font-family: monospace; font-size: 13px; line-height: 1.7; white-space: pre-wrap; min-height: 120px; color: var(--text); margin-bottom: 12px; }
+.preview-image { max-width: 150px; max-height: 150px; border-radius: 8px; margin-top: 10px; border: 1px solid var(--border); }
+.toast { position: fixed; bottom: 20px; right: 20px; background: var(--surface2); color: var(--text); padding: 12px 24px; border-radius: 30px; font-size: 14px; z-index: 400; opacity: 0; transition: all 0.3s; transform: translateY(20px); border: 1px solid var(--border); }
+.toast.show { opacity: 1; transform: translateY(0); }
+@media (max-width: 768px) {
+  .container { padding: 16px; }
+  .form-row { grid-template-columns: 1fr; }
+  .type-grid { grid-template-columns: repeat(3, 1fr); }
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>💬 Template Browser</h1>
+  <a href="dashboard.html">← Back to Dashboard</a>
+</div>
+<div class="container">
+  <p class="page-subtitle">Browse pre-built WhatsApp message templates for your business type. Customize variables and send directly.</p>
+
+  <!-- Business Type Selector -->
+  <div class="card">
+    <div class="card-title">Select Business Type</div>
+    <div class="type-grid" id="typeGrid"></div>
+  </div>
+
+  <!-- Templates List + Preview -->
+  <div class="form-row" style="gap: 20px;">
+    <div style="min-width: 0;">
+      <div class="card" style="height: 100%;">
+        <div class="card-title">Available Templates</div>
+        <div id="templateList">
+          <div class="template-card" style="cursor: default; border-color: var(--border);">
+            <div class="template-title" style="justify-content: center;">
+              <span>Select a business type to see templates</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card" style="height: 100%;">
+        <div class="card-title">Live Preview</div>
+        <div id="previewContent">
+          <div style="color: var(--text-light); font-size: 13px; text-align: center; padding: 20px;">
+            Select a template to preview
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Send Panel -->
+  <div class="card">
+    <div class="card-title">Send Template to Contact</div>
+    <div class="form-row" style="gap: 16px;">
+      <div class="form-group">
+        <label>Phone Number (with country code)</label>
+        <input type="tel" id="sendPhone" placeholder="+919876543210">
+      </div>
+      <div class="form-group">
+        <label>Delivery Method</label>
+        <select id="sendMethod">
+          <option value="bridge">Local WhatsApp Bridge</option>
+          <option value="cloud">Meta Cloud API</option>
+        </select>
+      </div>
+    </div>
+    <div style="display: flex; gap: 12px; margin-top: 16px;">
+      <button class="btn" onclick="sendTemplate()" id="sendBtn" disabled>📲 Send</button>
+      <button class="btn btn-secondary btn-sm" onclick="copyRendered()">📋 Copy Text</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const API = window.location.origin;
+const authToken = localStorage.getItem('wa_token') || localStorage.getItem('authToken') || '';
+let selectedType = '';
+let selectedTemplate = null;
+
+const BUSINESS_TYPES = [
+  { type: 'doctor', name: 'Doctor', icon: '🩺' },
+  { type: 'lawyer', name: 'Lawyer', icon: '⚖️' },
+  { type: 'restaurant', name: 'Restaurant', icon: '🍽️' },
+  { type: 'hotel', name: 'Hotel', icon: '🏨' },
+  { type: 'ca', name: 'Chartered Accountant', icon: '📊' },
+  { type: 'salon', name: 'Salon', icon: '💇' },
+  { type: 'retail', name: 'Retail', icon: '🛍️' },
+  { type: 'education', name: 'Education', icon: '📚' },
+];
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+async function apiFetch(path, opts = {}) {
+  opts.headers = opts.headers || {};
+  if (authToken) opts.headers['Authorization'] = 'Bearer ' + authToken;
+  if (opts.body && !opts.headers['Content-Type']) opts.headers['Content-Type'] = 'application/json';
+  const res = await fetch(API + path, opts);
+  if (res.status === 401) { showToast('⚠️ Session expired'); throw new Error('Unauthorized'); }
+  if (!res.ok) { const text = await res.text(); showToast('❌ ' + text); throw new Error(text || res.statusText); }
+  return res.json();
+}
+
+function renderTypeGrid() {
+  const grid = document.getElementById('typeGrid');
+  grid.innerHTML = BUSINESS_TYPES.map(bt =>
+    `<div class="type-card" onclick="selectType('${bt.type}')" id="type-${bt.type}">
+      <div class="type-icon">${bt.icon}</div>
+      <div class="type-name">${bt.name}</div>
+    </div>`
+  ).join('');
+}
+
+function selectType(businessType) {
+  selectedType = businessType;
+  selectedTemplate = null;
+  document.querySelectorAll('.type-card').forEach(c => c.classList.remove('selected'));
+  const el = document.getElementById('type-' + businessType);
+  if (el) el.classList.add('selected');
+  renderTemplates();
+}
+
+async function renderTemplates() {
+  const list = document.getElementById('templateList');
+  if (!selectedType) {
+    list.innerHTML = '<div class="template-card" style="cursor: default; border-color: var(--border);"><div class="template-title" style="justify-content: center;">Select a business type to see templates</div></div>';
+    return;
+  }
+  try {
+    list.innerHTML = '<div style="color: var(--text-light); font-size: 13px; padding: 10px 0;">Loading templates…</div>';
+    const data = await apiFetch(`/api/templates/profession/${selectedType}`);
+    const tmpls = data.templates || [];
+    if (tmpls.length === 0) {
+      list.innerHTML = '<div style="color: var(--text-light); font-size: 13px; padding: 10px 0;">No templates available</div>';
+      return;
+    }
+    list.innerHTML = tmpls.map(t =>
+      `<div class="template-card" onclick="selectTemplate('${t.id}')" id="tmpl-${t.id}">
+        <div class="template-title">
+          <span>${t.title}</span>
+          <span class="template-category">${t.category}</span>
+        </div>
+        <div class="template-content">${t.content.replace(/</g, '&lt;')}</div>
+        ${t.variables && t.variables.length > 0 ? '<div class="variable-list">' + t.variables.map(v => `<span class="variable-tag">{{${v}}}</span>`).join('') + '</div>' : ''}
+        ${t.image_url ? '<div style="font-size:11px;color:var(--info);margin-top:6px">🖼️ Image attached</div>' : ''}
+      </div>`
+    ).join('');
+  } catch(e) {
+    list.innerHTML = '<div style="color: var(--danger); font-size: 13px; padding: 10px 0;">Failed to load templates</div>';
+  }
+}
+
+function selectTemplate(templateId) {
+  fetch(`/api/templates/profession/${selectedType}`).then(r => r.json()).then(data => {
+    selectedTemplate = (data.templates || []).find(t => t.id === templateId);
+    renderPreview();
+  });
+}
+
+function renderPreview() {
+  const content = document.getElementById('previewContent');
+  const sendBtn = document.getElementById('sendBtn');
+  if (!selectedTemplate) {
+    content.innerHTML = '<div style="color: var(--text-light); font-size: 13px; text-align: center; padding: 20px;">Select a template to preview</div>';
+    sendBtn.disabled = true;
+    return;
+  }
+  sendBtn.disabled = false;
+
+  const vars = selectedTemplate.variables || [];
+  const varForm = vars.map(v =>
+    `<div class="form-group" style="margin-bottom:10px">
+      <label>{{${v}}}</label>
+      <input type="text" id="var_${v}" placeholder="Enter ${v}…" value="${v === 'business_name' ? 'My Business' : v === 'customer_name' ? 'Amit Kumar' : ''}">
+    </div>`
+  ).join('');
+
+  const renderedId = 'rendered-content';
+  const imageHtml = selectedTemplate.image_url ? `<div id="preview-image"></div>` : '';
+
+  content.innerHTML = `
+    <div style="font-size:12px;color:var(--text-light);margin-bottom:12px">
+      <strong>${selectedTemplate.title}</strong> — ${selectedTemplate.category}
+      <div style="margin-top:6px">ID: <code>${selectedTemplate.id}</code></div>
+    </div>
+    ${varForm}
+    <div style="margin-top:12px">
+      <button class="btn btn-secondary btn-sm" onclick="renderNow()" style="margin-bottom:12px">🔄 Render</button>
+    </div>
+    <div class="preview-box" id="${renderedId}">${selectedTemplate.content}</div>
+    ${imageHtml}
+  `;
+  renderNow();
+}
+
+function getVarValues() {
+  const vars = {};
+  document.querySelectorAll('[id^="var_"]').forEach(el => {
+    const key = el.id.replace('var_', '');
+    vars[key] = el.value;
+  });
+  return vars;
+}
+
+function renderNow() {
+  if (!selectedTemplate) return;
+  const vars = getVarValues();
+  let text = selectedTemplate.content;
+  for (const [k, v] of Object.entries(vars)) {
+    text = text.replace(new RegExp('{{' + k + '}}', 'g'), v || '');
+  }
+  document.getElementById('rendered-content').textContent = text;
+
+  if (selectedTemplate.image_url) {
+    let imgUrl = selectedTemplate.image_url;
+    for (const [k, v] of Object.entries(vars)) {
+      imgUrl = imgUrl.replace(new RegExp('{{' + k + '}}', 'g'), encodeURIComponent(v || ''));
+    }
+    document.getElementById('preview-image').innerHTML = `<img src="${imgUrl}" class="preview-image">`;
+  }
+}
+
+function copyRendered() {
+  const el = document.getElementById('rendered-content');
+  if (!el) { showToast('⚠️ Render a template first'); return; }
+  navigator.clipboard.writeText(el.textContent)
+    .then(() => showToast('✅ Copied to clipboard!'))
+    .catch(() => showToast('❌ Copy failed'));
+}
+
+async function sendTemplate() {
+  if (!selectedTemplate) { showToast('⚠️ Select a template first'); return; }
+  const phone = document.getElementById('sendPhone').value.trim();
+  if (!phone) { showToast('⚠️ Enter a phone number'); return; }
+  const method = document.getElementById('sendMethod').value;
+  const vars = getVarValues();
+
+  const payload = {
+    business_type: selectedType,
+    category: selectedTemplate.category,
+    template_id: selectedTemplate.id,
+    variables: vars,
+    to_phone: phone,
+    use_cloud_api: method === 'cloud',
+  };
+
+  try {
+    const btn = document.getElementById('sendBtn');
+    btn.textContent = '📤 Sending…';
+    btn.disabled = true;
+    const result = await apiFetch('/api/templates/send', { method: 'POST', body: JSON.stringify(payload) });
+    if (result.status === 'sent') {
+      showToast('✅ Message sent!');
+    } else {
+      showToast('⚠️ ' + (result.message || 'Rendered but not sent (check connection)'));
+    }
+  } catch(e) {
+    showToast('❌ ' + e.message);
+  } finally {
+    document.getElementById('sendBtn').textContent = '📲 Send';
+    document.getElementById('sendBtn').disabled = false;
+  }
+}
+
+renderTypeGrid();
+</script>
+</body>
+</html>

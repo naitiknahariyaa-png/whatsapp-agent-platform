@@ -64,10 +64,13 @@ class ComplianceManager:
     Handles consent, data export, right-to-delete, and data portability.
     """
 
+    OPT_OUT_KEYWORDS = {"stop", "unsubscribe", "बंद", "रद्द", "opt out", "end"}
+
     def __init__(self):
         self.consent_records: Dict[str, List[ConsentRecord]] = {}  # contact_id -> records
         self._deletion_requests: List[Dict] = []
         self._data_exports: List[Dict] = []
+        self.opt_out_records: Dict[str, Dict] = {}
 
     # --- Consent Management ---
 
@@ -227,6 +230,37 @@ class ComplianceManager:
             "total_deletion_requests": len(self._deletion_requests),
             "total_data_exports": len(self._data_exports),
         }
+
+    def is_opt_out_message(self, message: str) -> bool:
+        """Check if a message is an opt-out request in any supported language."""
+        normalized = message.strip().lower()
+        return normalized in self.OPT_OUT_KEYWORDS
+
+    def check_opt_out(self, phone_number: str, client_id: int = 1) -> Dict:
+        """Check if a phone number has opted out."""
+        if phone_number in self.opt_out_records:
+            record = self.opt_out_records[phone_number]
+            if record.get("client_id") == client_id:
+                return {"opted_out": True, "opted_out_at": record.get("opted_out_at"), "source": record.get("source")}
+        return {"opted_out": False}
+
+    def record_opt_out(self, phone_number: str, client_id: int = 1, source: str = "manual") -> Dict:
+        """Record an opt-out for a phone number."""
+        self.opt_out_records[phone_number] = {
+            "client_id": client_id,
+            "opted_out_at": datetime.utcnow().isoformat(),
+            "source": source,
+        }
+        logger.info(f"[v] Opt-out recorded for {phone_number} (source={source})")
+        return {"opted_out": True, "phone_number": phone_number}
+
+    def check_can_send(self, phone_number: str, client_id: int = 1) -> bool:
+        """Return False if the contact has opted out."""
+        if phone_number in self.opt_out_records:
+            record = self.opt_out_records[phone_number]
+            if record.get("client_id") == client_id:
+                return False
+        return True
 
 
 # ---------------------------------------------------------------------------

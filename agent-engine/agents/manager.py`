@@ -1,0 +1,125 @@
+import json
+import logging
+from typing import List, Dict, Any, Optional
+from agents.base import BaseAgent
+from memory_manager import memory_manager
+
+logger = logging.getLogger(\"manager_agent\")
+
+class ManagerAgent(BaseAgent):
+    \"\"\"
+    The CEO of the Agent Company.
+    Orchestrates Memory-Aware planning and delegation.
+    \"\"\"
+    def __init__(self):
+        system_prompt = (
+            \"You are the CEO Manager. Your role is orchestration. \"
+            \"\\n\\nSOP:\\n\"
+            \"1. Receive input + Context (Session, Entities, Knowledge).\\n\"
+            \"2. Plan a JSON list of agent tasks.\\n\"
+            \"3. Delegate to specialists.\\n\"
+            \"4. Verify and Synthesize result.\"
+        )
+        super().__init__(
+            name=\"CEO\", 
+            role=\"Company Manager\", 
+            system_prompt=system_prompt, 
+            tools=[] 
+        )
+        
+        from agents.sales import SalesAgent
+        from agents.support import SupportAgent
+        from agents.concierge import ConciergeAgent
+        self.staff = {
+            \"SalesAgent\": SalesAgent(),
+            \"SupportAgent\": SupportAgent(),
+            \"ConciergeAgent\": ConciergeAgent()
+        }
+
+    async def run(self, user_input: str, context: Dict[str, Any] = None) -> str:
+        # 1. Memory Injection
+        # context should contain phone_number and client_id
+        phone = context.get(\"phone_number\") if context else None
+        cid = context.get(\"client_id\") if context else 1
+
+        if phone:
+            # Layer 1: Session
+            session_mem = await memory_manager.get_session_memory(phone)
+            # Layer 2: Entities
+            entity_mem = await memory_manager.get_entity_memory(phone, cid)
+            # Layer 3: Semantic (based on current user input)
+            semantic_mem = await memory_manager.get_semantic_context(user_input, cid)
+            
+            full_context = {
+                \"session\": session_mem,
+                \"entities\": entity_mem,
+                \"knowledge\": semantic_mem,
+                \"original_context\": context
+            }
+        else:
+            full_context = context or {}
+
+        # 2. Planning Phase
+        messages = [
+            {\"role\": \"system\", \"content\": self._build_system_prompt() + \"\\n\\nRespond ONLY with a JSON plan list: [ {\\\"agent\\\": \\\"...\\\", \\\"task\\\": \\\"...\\\"} ]\"},
+            {\"role\": \"system\", \"content\": f\"Current Context:\\n{json.dumps(full_context, indent=2)}\"},
+            {\"role\": \"user\", \"content\": user_input}
+        ]
+
+        plan_response = await self.llm.generate(messages)
+        plan = self._extract_plan(plan_response.get(\"content\", \"\"))
+        
+        if not plan:
+            return \"I'm having trouble organizing my team's plan. Could you repeat that?\"
+
+        # 3. Execution & Verification
+        verified_results = []
+        for step in plan:
+            agent_name = step.get(\"agent\")
+            task = step.get(\"task\")
+            if agent_name in self.staff:
+                res = await self.staff[agent_name].run(task, context=full_context)
+                
+                # Verification
+                is_valid, feedback = await self._verify_result(user_input, task, res)
+                if is_valid:
+                    verified_results.append({\"agent\": agent_name, \"response\": res})
+                else:
+                    # Retry
+                    retry_task = f\"Task: {task}. Error: {feedback}. Correct this.\"
+                    res_retry = await self.staff[agent_name].run(retry_task, context=full_context)
+                    verified_results.append({\"agent\": agent_name, \"response\": res_retry})
+
+        # 4. Synthesis
+        synthesis_messages = [
+            {\"role\": \"system\", \"content\": self._build_system_prompt() + \"\\n\\nSynthesize verified results into one professional reply.\"},
+            {\"role\": \"user\", \"content\": user_input},
+            {\"role\": \"system\", \"content\": f\"Results: {json.dumps(verified_results)}\"}
+        ]
+        
+        final = await self.llm.generate(synthesis_messages)
+        return final.get(\"content\", \"I couldn't finalize the response.\")
+
+    async def _verify_result(self, original_input: str, task: str, result: str) -> tuple:
+        verify_prompt = (
+            f\"User Input: {original_input}\\nTask: {task}\\nResponse: {result}\\n\\n\"
+            \"Does this satisfy the task? Respond JSON: {\\\"valid\\\": true/false, \\\"feedback\\\": \\\"...\\\"}\"
+        )
+        try:
+            resp = await self.llm.generate([{\"role\": \"user\", \"content\": verify_prompt}])
+            import re
+            match = re.search(r'\\{.*\\}', resp.get(\"content\", \"\"), re.DOTALL)
+            if match:
+                data = json.loads(match.group(0))
+                return data.get(\"valid\", False), data.get(\"feedback\", \"\")
+        except Exception:
+            pass
+        return False, \"Verification error.\"
+
+    def _extract_plan(self, text: str) -> Optional[List[Dict]]:
+        import re
+        try:
+            match = re.search(r'\\[.*\\]', text, re.DOTALL)
+            if match: return json.loads(match.group(0))
+        except Exception: pass
+        return None

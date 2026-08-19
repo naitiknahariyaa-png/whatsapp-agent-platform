@@ -1,0 +1,50 @@
+import logging
+from agents.manager import ManagerAgent
+from memory_manager import memory_manager
+from db import async_session, ConversationSession
+from sqlalchemy import select
+
+logger = logging.getLogger(\"orchestrator\")
+
+manager = ManagerAgent()
+
+async def process_incoming_message(phone_number: str, message: str, client_id: int = 1):
+    try:
+        # 1. Entity Extraction (Automated background loop)
+        # This ensures every fact stated by the user is saved to the lead's profile
+        extracted = await memory_manager.extract_entities(message, phone_number, client_id)
+        if extracted:
+            logger.info(f\"[Memory] Extracted entities for {phone_number}: {extracted}\")
+
+        # 2. Context Preparation
+        async with async_session() as session:
+            result = await session.execute(
+                select(ConversationSession).where(
+                    ConversationSession.phone_number == phone_number,
+                    ConversationSession.client_id == client_id
+                )
+            )
+            conv_session = result.scalar_one_or_none()
+            
+            context = {
+                \"phone_number\": phone_number,
+                \"client_id\": client_id,
+                \"session_state\": conv_session.session_state if conv_session else \"browsing\",
+                \"entities\": conv_session.entities if conv_session else {}
+            }
+
+            # 3. Manager Orchestration (Now uses 3-Layer Memory)
+            logger.info(f\"Routing message from {phone_number} to the CEO...\")
+            final_response = await manager.run(message, context=context)
+
+            # 4. Session Update
+            if conv_session:
+                conv_session.last_user_message = message
+                conv_session.last_bot_message = final_response
+                await session.commit()
+            
+            return final_response
+
+    except Exception as e:
+        logger.error(f\"Orchestration failure: {e}\", exc_info=True)
+        return \"I'm having some trouble organizing my team. Please try again in a moment!\"

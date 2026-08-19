@@ -6,9 +6,9 @@ import os
 import httpx
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
-from sqlalchemy import select
+from sqlalchemy import select, Integer
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import String, Text, Integer, DateTime, JSON
+from sqlalchemy import String, Text, DateTime, JSON
 
 from db import Base, async_session
 
@@ -16,6 +16,7 @@ from db import Base, async_session
 class Lead(Base):
     __tablename__ = "leads"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(Integer, index=True, default=1)
     phone_number: Mapped[str] = mapped_column(String(20), index=True)
     name: Mapped[Optional[str]] = mapped_column(String(255))
     source: Mapped[Optional[str]] = mapped_column(String(50))  # facebook, instagram, direct
@@ -42,7 +43,7 @@ class LeadGenAgent:
             "What exactly are you looking for?"
         ]
 
-    async def receive_meta_webhook(self, payload: Dict[str, Any]) -> Dict:
+    async def receive_meta_webhook(self, payload: Dict[str, Any], client_id: int = 1) -> Dict:
         """Receive Meta webhook for Click-to-WhatsApp Ad leads"""
         try:
             entry = payload.get("entry", [{}])[0]
@@ -65,7 +66,8 @@ class LeadGenAgent:
                     name=name,
                     source="meta_ad",
                     campaign_id=campaign_id,
-                    ad_id=ad_id
+                    ad_id=ad_id,
+                    client_id=client_id,
                 )
 
                 return {"status": "lead_created", "lead_id": lead.id, "phone": phone}
@@ -76,11 +78,11 @@ class LeadGenAgent:
             return {"error": str(e)}
 
     async def create_lead(self, phone_number: str, name: str = "", source: str = "direct",
-                          campaign_id: str = "", ad_id: str = "", **kwargs) -> Lead:
+                          campaign_id: str = "", ad_id: str = "", client_id: int = 1, **kwargs) -> Lead:
         """Create or update a lead in CRM"""
         async with async_session() as session:
             existing = await session.execute(
-                select(Lead).where(Lead.phone_number == phone_number)
+                select(Lead).where(Lead.phone_number == phone_number, Lead.client_id == client_id)
             )
             lead = existing.scalar_one_or_none()
 
@@ -92,6 +94,7 @@ class LeadGenAgent:
                 lead.updated_at = datetime.now(timezone.utc)
             else:
                 lead = Lead(
+                    client_id=client_id,
                     phone_number=phone_number,
                     name=name,
                     source=source,
@@ -105,16 +108,16 @@ class LeadGenAgent:
             await session.refresh(lead)
             return lead
 
-    async def qualify_lead(self, phone_number: str, message: str, entities: Dict) -> Dict:
+    async def qualify_lead(self, phone_number: str, message: str, entities: Dict, client_id: int = 1) -> Dict:
         """Qualify a lead based on extracted entities from conversation"""
         async with async_session() as session:
             result = await session.execute(
-                select(Lead).where(Lead.phone_number == phone_number)
+                select(Lead).where(Lead.phone_number == phone_number, Lead.client_id == client_id)
             )
             lead = result.scalar_one_or_none()
 
             if not lead:
-                lead = await self.create_lead(phone_number=phone_number, source="whatsapp")
+                lead = await self.create_lead(phone_number=phone_number, source="whatsapp", client_id=client_id)
 
             # Update lead with extracted info
             updated = False
@@ -175,17 +178,14 @@ class LeadGenAgent:
             return "What exactly are you looking for? 🎯"
         return None  # Lead fully qualified
 
-    async def get_leads(self, status: str = "") -> List[Dict]:
+    async def get_leads(self, status: str = "", client_id: int = 1) -> List[Dict]:
         """Get all leads, optionally filtered by status"""
         async with async_session() as session:
+            query = select(Lead).where(Lead.client_id == client_id)
             if status:
-                result = await session.execute(
-                    select(Lead).where(Lead.status == status).order_by(Lead.created_at.desc())
-                )
-            else:
-                result = await session.execute(
-                    select(Lead).order_by(Lead.created_at.desc())
-                )
+                query = query.where(Lead.status == status)
+            query = query.order_by(Lead.created_at.desc())
+            result = await session.execute(query)
             leads = result.scalars().all()
             return [{
                 "id": l.id,
@@ -200,10 +200,10 @@ class LeadGenAgent:
                 "created_at": l.created_at.isoformat() if l.created_at else None
             } for l in leads]
 
-    async def get_lead_detail(self, lead_id: int) -> Optional[Dict]:
+    async def get_lead_detail(self, lead_id: int, client_id: int = 1) -> Optional[Dict]:
         """Return full lead record by id."""
         async with async_session() as session:
-            result = await session.execute(select(Lead).where(Lead.id == lead_id))
+            result = await session.execute(select(Lead).where(Lead.id == lead_id, Lead.client_id == client_id))
             l = result.scalar_one_or_none()
             if not l:
                 return None
@@ -222,14 +222,14 @@ class LeadGenAgent:
                 "updated_at": l.updated_at.isoformat() if l.updated_at else None,
             }
 
-    async def update_lead_status(self, lead_id: int, status: str) -> Dict:
+    async def update_lead_status(self, lead_id: int, status: str, client_id: int = 1) -> Dict:
         """Update lead status (new → qualified → contacted → converted/lost)"""
         valid = ["new", "qualified", "contacted", "converted", "lost"]
         if status not in valid:
             return {"error": f"Invalid status. Options: {valid}"}
 
         async with async_session() as session:
-            result = await session.execute(select(Lead).where(Lead.id == lead_id))
+            result = await session.execute(select(Lead).where(Lead.id == lead_id, Lead.client_id == client_id))
             lead = result.scalar_one_or_none()
             if not lead:
                 return {"error": "Lead not found"}

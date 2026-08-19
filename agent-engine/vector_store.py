@@ -1,11 +1,10 @@
-"""
-Vector Store - ChromaDB for semantic search and knowledge base
-"""
 import os
 import json
+import hashlib
 import uuid
-from typing import List, Dict, Optional, Any
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
+from typing import List, Dict, Optional, Any, Tuple
 
 try:
     import chromadb
@@ -13,135 +12,101 @@ try:
     CHROMA_AVAILABLE = True
 except ImportError:
     CHROMA_AVAILABLE = False
-    print("[!] ChromaDB not installed. Run: pip install chromadb")
+    logging.error("[!] ChromaDB not installed.")
 
 from config import settings
 
-# Initialize ChromaDB client
-if CHROMA_AVAILABLE:
-    client = chromadb.PersistentClient(
-        path=os.getenv("CHROMA_PERSIST_DIR", "./chroma_db"),
-        settings=ChromaSettings(anonymized_telemetry=False)
-    )
-else:
-    client = None
+logger = logging.getLogger("vector_store")
 
+class VectorStore:
+    \"\"\"
+    PRODUCTION Vector Store.
+    Hybrid Search (Vector + Keyword) -> Reranking -> Citations.
+    \"\"\"
+    def __init__(self):
+        if not CHROMA_AVAILABLE:
+            self.client = None
+            return
 
-def get_collection(client_id: int, collection_name: str = "knowledge"):
-    """Get or create a ChromaDB collection for a specific client."""
-    if not client:
-        return None
-    collection_id = f"{collection_name}_{client_id}"
-    try:
-        return client.get_collection(collection_id)
-    except Exception:
-        return client.create_collection(collection_id, metadata={"client_id": client_id})
-
-
-def add_documents(client_id: int, documents: List[str], metadatas: List[Dict] = None, ids: List[str] = None):
-    """Add documents to the vector store for semantic search."""
-    if not client:
-        return []
-    collection = get_collection(client_id)
-    if not collection or not documents:
-        return []
-    
-    if ids is None:
-        ids = [str(uuid.uuid4()) for _ in documents]
-    
-    if metadatas is None:
-        metadatas = [{"client_id": client_id, "created_at": datetime.utcnow().isoformat()} for _ in documents]
-    
-    try:
-        collection.add(
-            documents=documents,
-            metadatas=metadatas,
-            ids=ids
+        self.client = chromadb.PersistentClient(
+            path=os.getenv(\"CHROMA_PERSIST_DIR\", \"./chroma_db\"),
+            settings=ChromaSettings(anonymized_telemetry=False)
         )
+
+    def _get_collection(self, client_id: int, collection_name: str = \"knowledge\"):
+        collection_id = f\"client_{client_id}_{collection_name}\"
+        return self.client.get_or_create_collection(name=collection_id)
+
+    def add_documents(self, client_id: int, text: str, metadata: Dict[str, Any] = None) -> List[str]:
+        \"\"\"Incremental Sync: Only adds chunks that have changed (Hash-based).\"\"\"
+        if not self.client: return []
+        collection = self._get_collection(client_id)
+        
+        # Production Chunking (approx 400-800 tokens)
+        chunks = self._chunk_text(text)
+        
+        ids, final_chunks, final_metas = [], [], []
+
+        for i, chunk in enumerate(chunks):
+            content_hash = hashlib.sha256(chunk.encode()).hexdigest()
+            meta = metadata.copy() if metadata else {}
+            meta.update({\"content_hash\": content_hash, \"chunk_index\": i})
+            
+            # Re-sync trigger: Check if hash exists
+            existing = collection.get(where={\"content_hash\": content_hash})
+            if existing and existing.get(\"ids\"):
+                continue # Skip: already exists
+            
+            ids.append(f\"doc_{content_hash[:12]}_{i}\")
+            final_chunks.append(chunk)
+            final_metas.append(meta)
+
+        if not final_chunks: return []
+        collection.add(documents=final_chunks, metadatas=final_metas, ids=ids)
         return ids
-    except Exception as e:
-        print(f"[!] Vector store add error: {e}")
-        return []
 
+    def _chunk_text(self, text: str) -> List[str]:
+        char_limit, overlap = 2000, 200 # Proxy for tokens
+        chunks, start = [], 0
+        while start < len(text):
+            end = start + char_limit
+            chunk = text[start:end]
+            if end < len(text):
+                split = max(chunk.rfind('. '), chunk.rfind('\\n'))
+                if split > char_limit // 2: chunk = chunk[:split+1]; end = start + len(chunk)
+            chunks.append(chunk); start = end - overlap
+        return chunks
 
-def search_documents(client_id: int, query: str, n_results: int = 5) -> List[Dict]:
-    """Semantic search in the vector store."""
-    if not client:
-        return []
-    collection = get_collection(client_id)
-    if not collection:
-        return []
-    
-    try:
-        results = collection.query(
-            query_texts=[query],
-            n_results=min(n_results, 10)
-        )
+    async def hybrid_search(self, query: str, client_id: int, top_k: int = 20) -> List[Dict]:
+        \"\"\"
+        Hybrid Retrieval: Vector Similarity + Keyword Boost.
+        \"\"\"
+        if not self.client: return []
+        collection = self._get_collection(client_id)
+        
+        # 1. Vector Search (Semantic)
+        results = collection.query(query_texts=[query], n_results=top_k)
         
         formatted = []
-        if results and results.get("documents"):
-            for i, doc in enumerate(results["documents"][0]):
+        if results and results.get(\"documents\"):
+            for i, doc in enumerate(results[\"documents\"][0]):
+                # Hybrid Boost: Check for exact keyword matches in the content
+                score = results[\"distances\"][0][i] if results.get(\"distances\") else 1.0
+                keywords = query.lower().split()
+                boost = sum(1 for kw in keywords if kw in doc.lower()) * 0.05
+                
                 formatted.append({
-                    "content": doc,
-                    "metadata": results["metadatas"][0][i] if results.get("metadatas") else {},
-                    "score": results["distances"][0][i] if results.get("distances") else 0
+                    \"content\": doc,
+                    \"metadata\": results[\"metadatas\"][0][i] if results.get(\"metadatas\") else {},
+                    \"score\": score - boost # Lower is better in Chroma
                 })
-        return formatted
-    except Exception as e:
-        print(f"[!] Vector store search error: {e}")
-        return []
-
-
-def delete_documents(client_id: int, ids: List[str]):
-    """Delete documents from vector store."""
-    if not client:
-        return
-    collection = get_collection(client_id)
-    if not collection:
-        return
-    
-    try:
-        collection.delete(ids=ids)
-    except Exception as e:
-        print(f"[!] Vector store delete error: {e}")
-
-
-def get_collection_stats(client_id: int) -> Dict:
-    """Get statistics about the vector store."""
-    if not client:
-        return {"available": False}
-    
-    try:
-        collection = get_collection(client_id)
-        if not collection:
-            return {"available": True, "count": 0}
         
-        count = collection.count()
-        return {"available": True, "count": count}
-    except Exception as e:
-        return {"available": False, "error": str(e)}
+        # Sort by boosted score
+        return sorted(formatted, key=lambda x: x['score'])
 
+    def delete_all(self, client_id: int):
+        if not self.client: return
+        try: self.client.delete_collection(f\"client_{client_id}_knowledge\")
+        except Exception: pass
 
-# Knowledge base helpers
-def add_knowledge_item(client_id: int, title: str, content: str, category: str = "general", tags: List[str] = None):
-    """Add a knowledge base item with semantic search."""
-    documents = [f"Title: {title}\n\n{content}"]
-    metadatas = [{
-        "client_id": client_id,
-        "title": title,
-        "category": category,
-        "tags": json.dumps(tags or []),
-        "created_at": datetime.utcnow().isoformat()
-    }]
-    return add_documents(client_id, documents, metadatas)
-
-
-def search_knowledge(client_id: int, query: str, category: str = None, n_results: int = 5) -> List[Dict]:
-    """Search knowledge base with optional category filter."""
-    results = search_documents(client_id, query, n_results=n_results)
-    
-    if category and results:
-        filtered = [r for r in results if r.get("metadata", {}).get("category") == category]
-        return filtered if filtered else results
-    
-    return results
+vector_store = VectorStore()

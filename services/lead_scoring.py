@@ -4,9 +4,11 @@ AI-driven Lead Scoring Engine — scores leads based on behavior, demographics, 
 import json
 import logging
 import math
+import re
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from enum import Enum
+from llm_setup import get_llm
 
 logger = logging.getLogger("lead_scoring")
 
@@ -93,6 +95,93 @@ class LeadProfile:
         }
 
 
+HOT_LEAD_THRESHOLD = 75
+
+
+class LLMLeadScorer:
+    """LLM-based lead scorer that analyzes conversation turns for intent, urgency, budget, and sentiment."""
+
+    def __init__(self):
+        self.llm = get_llm()
+        self.assessments: Dict[str, List[Dict]] = {}
+
+    def _key(self, phone: str, client_id: int) -> str:
+        return f"{client_id}_{phone}"
+
+    async def assess(self, phone: str, message: str, client_id: int = 1) -> Dict[str, Any]:
+        prompt = [
+            {"role": "system", "content": "You are a lead scoring assistant. Analyze the customer message and return ONLY JSON: {\"intent\": \"buy|inquire|support|complaint|general\", \"urgency\": 1-5, \"budget_signal\": true|false, \"sentiment\": \"positive|neutral|negative\", \"reasoning\": \"...\"}."},
+            {"role": "user", "content": message},
+        ]
+        try:
+            response = await self.llm.generate(prompt)
+            raw = response.get("content", "{}")
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+            else:
+                data = {}
+        except Exception:
+            data = {}
+
+        assessment = {
+            "intent": data.get("intent", "general"),
+            "urgency": int(data.get("urgency", 1)),
+            "budget_signal": bool(data.get("budget_signal", False)),
+            "sentiment": data.get("sentiment", "neutral"),
+            "reasoning": data.get("reasoning", ""),
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        key = self._key(phone, client_id)
+        if key not in self.assessments:
+            self.assessments[key] = []
+        self.assessments[key].append(assessment)
+        return assessment
+
+    def compute_llm_score(self, assessment: Dict[str, Any]) -> float:
+        score = 0.0
+        if assessment.get("urgency", 1) >= 4:
+            score += 25
+        if assessment.get("budget_signal"):
+            score += 20
+        sentiment = assessment.get("sentiment", "neutral")
+        if sentiment == "positive":
+            score += 10
+        elif sentiment == "negative":
+            score -= 10
+        return max(0, min(100, score))
+
+    def record_llm_assessment(self, phone: str, assessment: Dict[str, Any], client_id: int = 1):
+        key = self._key(phone, client_id)
+        if key not in self.assessments:
+            self.assessments[key] = []
+        self.assessments[key].append(assessment)
+
+    def get_blended_score(self, phone: str, rule_score: float, client_id: int = 1) -> Dict[str, Any]:
+        key = self._key(phone, client_id)
+        assessments = self.assessments.get(key, [])
+        latest = assessments[-1] if assessments else {}
+        llm_score = self.compute_llm_score(latest)
+        final_score = (rule_score * 0.4) + (llm_score * 0.6)
+        return {
+            "final_score": round(final_score, 1),
+            "rule_score": round(rule_score, 1),
+            "llm_score": round(llm_score, 1),
+            "latest_assessment": latest,
+        }
+
+    def check_hot_lead(self, phone: str, rule_score: float, client_id: int = 1) -> Optional[Dict]:
+        blended = self.get_blended_score(phone, rule_score, client_id)
+        if blended["final_score"] >= HOT_LEAD_THRESHOLD:
+            return blended
+        return None
+
+
+# Global instance
+llm_lead_scorer = LLMLeadScorer()
+
+
 class LeadScoringEngine:
     """
     AI-driven lead scoring engine.
@@ -174,8 +263,10 @@ class LeadScoringEngine:
         if location and location.lower() in profile.custom_fields.get("target_locations", []):
             total_score += 10
 
-        # Normalize to 0-100
-        profile.score = max(0, min(100, total_score))
+        # 5. Blend with LLM score if available
+        rule_score = max(0, min(100, total_score))
+        blended = llm_lead_scorer.get_blended_score(profile.contact_id, rule_score, profile.client_id)
+        profile.score = blended["final_score"]
 
         # Determine tier
         if profile.score >= 60:
@@ -186,6 +277,26 @@ class LeadScoringEngine:
             profile.tier = LeadTier.COLD
         else:
             profile.tier = LeadTier.DEAD
+
+        # Hot lead notification
+        if profile.score >= HOT_LEAD_THRESHOLD:
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(self._notify_hot_lead(profile))
+                else:
+                    loop.run_until_complete(self._notify_hot_lead(profile))
+            except Exception as e:
+                logger.warning("Hot lead notification scheduling failed: %s", e)
+
+    async def _notify_hot_lead(self, profile: LeadProfile):
+        from handoff import send_push_notification
+        await send_push_notification(
+            title=f"Hot Lead Alert: {profile.contact_id}",
+            body=f"Lead score: {profile.score:.1f} | Tier: {profile.tier.value} | Client: {profile.client_id}",
+            phone_number=profile.contact_id,
+        )
 
     def update_custom_fields(self, contact_id: str, fields: Dict[str, Any],
                              client_id: int = 1):

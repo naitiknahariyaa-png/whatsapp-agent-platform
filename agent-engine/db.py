@@ -3,11 +3,12 @@ Database module - Uses PostgreSQL if available, falls back to SQLite for standal
 For full functionality, run Docker with: docker-compose up -d
 """
 import os
+import json
 os.environ['SQLALCHEMY_SKIP_PLATFORM_CHECK'] = '1'  # Fix for Windows
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import String, Text, Integer, DateTime, JSON, ForeignKey, select
+from sqlalchemy import String, Text, Integer, Float, Boolean, DateTime, JSON, ForeignKey, select
 from datetime import datetime, timezone
 from typing import Optional, List
 import os
@@ -21,7 +22,7 @@ if not DATABASE_URL:
 
 print(f"[i] Using database: {DATABASE_URL.split('://')[0]}")
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+engine = create_async_engine(DATABASE_URL, echo=False, pool_size=20, max_overflow=10)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -99,6 +100,7 @@ class Appointment(Base):
     duration_minutes: Mapped[int] = mapped_column(Integer, default=30)
     status: Mapped[str] = mapped_column(String(20), default="scheduled")
     calendar_event_id: Mapped[Optional[str]] = mapped_column(String(255))
+    sector_metadata: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -168,7 +170,116 @@ class ConversationSession(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+
+# -- Seller CRM models (Amazon / Flipkart) --
+
+class SellerProduct(Base):
+    __tablename__ = "seller_products"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True, default=1)
+    sku: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    category: Mapped[Optional[str]] = mapped_column(String(100))
+    cogs: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class SellerListing(Base):
+    __tablename__ = "seller_listings"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True, default=1)
+    product_id: Mapped[int] = mapped_column(ForeignKey("seller_products.id"), index=True)
+    platform: Mapped[str] = mapped_column(String(20))
+    listing_id: Mapped[str] = mapped_column(String(100), index=True)
+    title: Mapped[str] = mapped_column(Text)
+    bullets: Mapped[Optional[str]] = mapped_column(Text)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    backend_keywords: Mapped[Optional[str]] = mapped_column(String(500))
+    price: Mapped[float] = mapped_column(Float)
+    stock: Mapped[int] = mapped_column(Integer, default=0)
+    seo_score: Mapped[float] = mapped_column(Float, default=0.0)
+    seo_issues: Mapped[Optional[List[str]]] = mapped_column(JSON, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_audited_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class SellerOrder(Base):
+    __tablename__ = "seller_orders"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True, default=1)
+    product_id: Mapped[Optional[int]] = mapped_column(ForeignKey("seller_products.id"), index=True)
+    platform: Mapped[str] = mapped_column(String(20), index=True)
+    order_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    customer_name: Mapped[Optional[str]] = mapped_column(String(255))
+    customer_phone: Mapped[Optional[str]] = mapped_column(String(20))
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    unit_price: Mapped[float] = mapped_column(Float)
+    tax: Mapped[float] = mapped_column(Float, default=0.0)
+    shipping: Mapped[float] = mapped_column(Float, default=0.0)
+    total: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
+    payment_status: Mapped[str] = mapped_column(String(50), default="pending")
+    fulfillment_status: Mapped[str] = mapped_column(String(50), default="unfulfilled")
+    shipping_address: Mapped[Optional[str]] = mapped_column(Text)
+    tracking_id: Mapped[Optional[str]] = mapped_column(String(100))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    raw_data: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class PriceHistory(Base):
+    __tablename__ = "price_history"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True, default=1)
+    product_id: Mapped[int] = mapped_column(ForeignKey("seller_products.id"), index=True)
+    platform: Mapped[str] = mapped_column(String(20), index=True)
+    my_price: Mapped[float] = mapped_column(Float)
+    competitor_price: Mapped[float] = mapped_column(Float)
+    competitor_name: Mapped[Optional[str]] = mapped_column(String(255))
+    price_delta: Mapped[float] = mapped_column(Float)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class SeoAudit(Base):
+    __tablename__ = "seo_audits"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True, default=1)
+    listing_id: Mapped[int] = mapped_column(ForeignKey("seller_listings.id"), index=True)
+    score: Mapped[float] = mapped_column(Float)
+    issues: Mapped[Optional[List[str]]] = mapped_column(JSON, default=list)
+    suggestions: Mapped[Optional[List[str]]] = mapped_column(JSON, default=list)
+    keywords_found: Mapped[Optional[List[str]]] = mapped_column(JSON, default=list)
+    keywords_missing: Mapped[Optional[List[str]]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class PriceAlert(Base):
+    __tablename__ = "price_alerts"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True, default=1)
+    product_id: Mapped[int] = mapped_column(ForeignKey("seller_products.id"), index=True)
+    platform: Mapped[str] = mapped_column(String(20))
+    alert_type: Mapped[str] = mapped_column(String(50))
+    message: Mapped[str] = mapped_column(Text)
+    my_price: Mapped[float] = mapped_column(Float)
+    competitor_price: Mapped[float] = mapped_column(Float)
+    is_resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
 from broadcast import BroadcastList, BroadcastCampaign  # noqa: F401 - ensure tables are registered
+from lead_gen import Lead  # noqa: F401 - ensure leads table are registered
+
+
+def register_loop_models():
+    """Lazy import of Phase 3 loop models to avoid circular imports."""
+    from lead_funnel import LeadFunnelEnrollment      # noqa: F401
+    from appointment_nurture import AppointmentNurtureEnrollment  # noqa: F401
+    from compliance_loop import ConsentRecordDB, DataRetentionLog  # noqa: F401
+    from reengagement_loop import ReengagementLog     # noqa: F401
 
 
 async def get_session():
@@ -375,3 +486,53 @@ async def get_bookings(client_id: int, business_id: str = "", limit: int = 50):
         result = await session.execute(query)
         bookings = result.scalars().all()
         return [b.to_dict() for b in bookings]
+
+
+class DeadLetterJob(Base):
+    __tablename__ = "dead_letter_jobs"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    task_name: Mapped[str] = mapped_column(String(100))
+    args: Mapped[Optional[str]] = mapped_column(Text)
+    kwargs: Mapped[Optional[str]] = mapped_column(Text)
+    error: Mapped[str] = mapped_column(Text)
+    retries: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    failed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+async def create_dead_letter_job(session, task_name: str, args: list, kwargs: dict, error: str, retries: int):
+    job = DeadLetterJob(
+        task_name=task_name,
+        args=json.dumps(args),
+        kwargs=json.dumps(kwargs),
+        error=error,
+        retries=retries,
+    )
+    session.add(job)
+    await session.commit()
+    return job
+
+
+async def create_indexes():
+    """Create indexes on hot-read columns for messages, appointments, bookings, conversation_sessions."""
+    from sqlalchemy import text
+    index_statements = [
+        "CREATE INDEX IF NOT EXISTS idx_messages_phone_number ON messages (phone_number)",
+        "CREATE INDEX IF NOT EXISTS idx_messages_client_id ON messages (client_id)",
+        "CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversation_id)",
+        "CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages (created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_appointments_client_id ON appointments (client_id)",
+        "CREATE INDEX IF NOT EXISTS idx_appointments_phone_number ON appointments (phone_number)",
+        "CREATE INDEX IF NOT EXISTS idx_appointments_created_at ON appointments (created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_bookings_client_id ON bookings (client_id)",
+        "CREATE INDEX IF NOT EXISTS idx_bookings_created_at ON bookings (created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_conversation_sessions_client_id ON conversation_sessions (client_id)",
+        "CREATE INDEX IF NOT EXISTS idx_conversation_sessions_phone_number ON conversation_sessions (phone_number)",
+        "CREATE INDEX IF NOT EXISTS idx_conversation_sessions_created_at ON conversation_sessions (created_at)",
+    ]
+    async with engine.begin() as conn:
+        for stmt in index_statements:
+            try:
+                await conn.execute(text(stmt))
+            except Exception:
+                pass

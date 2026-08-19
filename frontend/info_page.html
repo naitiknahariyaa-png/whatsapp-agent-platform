@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Message Sender — WhatsApp Agent Platform</title>
+<style>
+:root {
+  --primary: #25D366;
+  --secondary: #128C7E;
+  --bg: #0a0a0f;
+  --surface: #14141c;
+  --surface2: #1a1a24;
+  --text: #e8e8f0;
+  --text-light: #8a8a9a;
+  --border: #2a2a35;
+  --gradient: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+  --shadow: 0 2px 12px rgba(0,0,0,0.3);
+  --radius: 12px;
+  --danger: #ff1010;
+  --warning: #ffd93d;
+  --info: #4fc3f7;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+.header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+.header h1 { font-size: 18px; font-weight: 700; color: var(--primary); }
+.header a { color: var(--text-light); text-decoration: none; font-size: 13px; }
+.header a:hover { color: var(--primary); }
+.container { max-width: 900px; margin: 0 auto; padding: 24px; }
+.card { background: var(--surface); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow); margin-bottom: 20px; border: 1px solid var(--border); }
+.card-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; }
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text-light); }
+.form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px 14px; border: 2px solid var(--border); border-radius: 10px; font-size: 14px; outline: none; transition: all 0.2s; background: var(--surface2); color: var(--text); }
+.form-group input:focus, .form-group textarea:focus, .form-group select:focus { border-color: var(--primary); }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.btn { background: var(--gradient); color: #fff; border: none; padding: 10px 24px; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+.btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(37,211,102,0.3); }
+.btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+.btn-sm { padding: 6px 14px; font-size: 12px; }
+.type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+.type-card { border: 2px solid var(--border); border-radius: var(--radius); padding: 20px; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--surface2); }
+.type-card:hover { border-color: var(--primary); transform: translateY(-2px); }
+.type-card.selected { border-color: var(--primary); background: rgba(37,211,102,0.1); }
+.type-icon { font-size: 36px; margin-bottom: 8px; }
+.type-name { font-size: 13px; font-weight: 600; }
+.template-list { display: grid; gap: 12px; }
+.template-item { border: 1px solid var(--border); border-radius: 10px; padding: 16px; cursor: pointer; transition: all 0.2s; background: var(--surface2); }
+.template-item:hover { border-color: var(--primary); }
+.template-item.selected { border-color: var(--primary); background: rgba(37,211,102,0.1); }
+.template-item h4 { font-size: 14px; margin-bottom: 4px; }
+.template-item p { font-size: 12px; color: var(--text-light); }
+.preview { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-top: 16px; white-space: pre-wrap; font-size: 14px; line-height: 1.6; }
+.toast { position: fixed; bottom: 20px; right: 20px; background: var(--surface2); color: var(--text); padding: 12px 24px; border-radius: 30px; font-size: 14px; z-index: 400; opacity: 0; transition: all 0.3s; transform: translateY(20px); border: 1px solid var(--border); }
+.toast.show { opacity: 1; transform: translateY(0); }
+@media (max-width: 768px) {
+  .form-row { grid-template-columns: 1fr; }
+  .container { padding: 16px; }
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>📨 Message Sender</h1>
+  <a href="/frontend/dashboard.html">← Back to Dashboard</a>
+</div>
+
+<div class="container">
+  <!-- Step 1: Choose Business Type -->
+  <div class="card" id="step1">
+    <div class="card-title">Step 1: Choose Business Type</div>
+    <div class="type-grid" id="typeGrid"></div>
+  </div>
+
+  <!-- Step 2: Choose Template -->
+  <div class="card" id="step2" style="display:none">
+    <div class="card-title">Step 2: Choose Message Template</div>
+    <div class="template-list" id="templateList"></div>
+  </div>
+
+  <!-- Step 3: Fill Details -->
+  <div class="card" id="step3" style="display:none">
+    <div class="card-title">Step 3: Fill Customer Details</div>
+    <div id="variableForm"></div>
+    <div class="form-group">
+      <label>Send To (WhatsApp Number)</label>
+      <input type="tel" id="toPhone" placeholder="+91 98765 43210">
+    </div>
+    <div class="form-group">
+      <label>Send Method</label>
+      <select id="sendMethod">
+        <option value="bridge">WhatsApp Bridge (QR)</option>
+        <option value="cloud">Cloud API (Meta)</option>
+        <option value="render">Preview Only (No Send)</option>
+      </select>
+    </div>
+    <button class="btn" onclick="sendMessage()">📨 Send Message</button>
+    <div class="preview" id="preview" style="display:none"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const BUSINESS_TYPES = [
+  { type: 'doctor', name: 'Doctor', icon: '🩺' },
+  { type: 'ca', name: 'CA', icon: '📊' },
+  { type: 'lawyer', name: 'Lawyer', icon: '⚖️' },
+  { type: 'restaurant', name: 'Restaurant', icon: '🍽️' },
+  { type: 'salon', name: 'Salon', icon: '💇' },
+  { type: 'hotel', name: 'Hotel', icon: '🏨' },
+  { type: 'retail', name: 'Retail', icon: '🛍️' },
+  { type: 'education', name: 'Education', icon: '📚' }
+];
+
+let selectedType = '';
+let selectedTemplate = null;
+let templates = [];
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// Step 1: Render business types
+function renderTypes() {
+  const grid = document.getElementById('typeGrid');
+  grid.innerHTML = BUSINESS_TYPES.map(t => `
+    <div class="type-card" onclick="selectType('${t.type}')">
+      <div class="type-icon">${t.icon}</div>
+      <div class="type-name">${t.name}</div>
+    </div>
+  `).join('');
+}
+
+function selectType(type) {
+  selectedType = type;
+  document.querySelectorAll('.type-card').forEach(c => c.classList.remove('selected'));
+  event.currentTarget.classList.add('selected');
+  loadTemplates(type);
+}
+
+// Step 2: Load templates for business type
+async function loadTemplates(type) {
+  try {
+    const res = await fetch(`/api/templates/profession/${type}`);
+    const data = await res.json();
+    templates = data.templates || [];
+    const list = document.getElementById('templateList');
+    list.innerHTML = templates.map(t => `
+      <div class="template-item" onclick="selectTemplate('${t.id}')">
+        <h4>${t.title}</h4>
+        <p>${t.description || ''}</p>
+        <p style="margin-top:4px;color:var(--info)">${t.category}</p>
+      </div>
+    `).join('');
+    document.getElementById('step2').style.display = 'block';
+    document.getElementById('step3').style.display = 'none';
+    document.getElementById('step2').scrollIntoView({ behavior: 'smooth' });
+  } catch (e) {
+    showToast('Error loading templates: ' + e.message);
+  }
+}
+
+function selectTemplate(id) {
+  selectedTemplate = templates.find(t => t.id === id);
+  document.querySelectorAll('.template-item').forEach(c => c.classList.remove('selected'));
+  event.currentTarget.classList.add('selected');
+  renderVariableForm();
+}
+
+// Step 3: Render variable form based on template
+function renderVariableForm() {
+  if (!selectedTemplate) return;
+  const form = document.getElementById('variableForm');
+  const vars = selectedTemplate.variables || [];
+  form.innerHTML = vars.map(v => `
+    <div class="form-group">
+      <label>${v.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</label>
+      <input type="text" id="var_${v}" placeholder="Enter ${v.replace(/_/g, ' ')}">
+    </div>
+  `).join('');
+  document.getElementById('step3').style.display = 'block';
+  document.getElementById('step3').scrollIntoView({ behavior: 'smooth' });
+}
+
+// Send message
+async function sendMessage() {
+  if (!selectedTemplate) { showToast('Please select a template first'); return; }
+  
+  const variables = {};
+  (selectedTemplate.variables || []).forEach(v => {
+    variables[v] = document.getElementById('var_' + v)?.value || '';
+  });
+  
+  const toPhone = document.getElementById('toPhone').value;
+  const method = document.getElementById('sendMethod').value;
+  
+  const payload = {
+    business_type: selectedType,
+    category: selectedTemplate.category,
+    variables: variables,
+    to_phone: toPhone,
+    use_cloud_api: method === 'cloud'
+  };
+  
+  try {
+    const res = await fetch('/api/templates/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    
+    const preview = document.getElementById('preview');
+    preview.style.display = 'block';
+    preview.textContent = data.rendered_text || JSON.stringify(data, null, 2);
+    
+    if (data.status === 'sent') {
+      showToast('✅ Message sent successfully!');
+    } else if (data.status === 'rendered') {
+      showToast('📝 Message rendered (not sent - check connection)');
+    } else {
+      showToast('⚠️ ' + (data.detail || 'Something went wrong'));
+    }
+  } catch (e) {
+    showToast('Error: ' + e.message);
+  }
+}
+
+// Init
+renderTypes();
+</script>
+</body>
+</html>

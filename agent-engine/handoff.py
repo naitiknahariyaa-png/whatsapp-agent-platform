@@ -45,6 +45,11 @@ async def send_telegram_message(text: str, phone_number: str = ""):
         })
 
 
+async def send_push_notification(title: str, body: str, phone_number: str = ""):
+    """Send push notification via Telegram for hot leads and alerts."""
+    await send_telegram_message(f"🔔 {title}\n{body}", phone_number)
+
+
 async def send_whatsapp_message(phone_number: str, text: str):
     """Send message to WhatsApp via bridge"""
     async with httpx.AsyncClient() as client:

@@ -6,9 +6,11 @@ import sys
 import uuid
 import hmac
 import hashlib
+import json
+import asyncio
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 
 # Add services directory to Python path (absolute path)
@@ -29,7 +31,7 @@ if _SERVICES_DIR not in sys.path:
             sys.path.insert(0, _alt)
             print(f"[i] Trying alt path: {_alt}", flush=True)
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
@@ -60,7 +62,10 @@ from auth import (
     LoginRequest, RegisterRequest, TokenResponse, Role, User,
     create_user, authenticate, create_access_token, get_current_user,
     require_role, require_admin, log_action, JWT_EXPIRE_HOURS,
+    EmailVerifyRequest, OTPRequest, OTPVerifyRequest,
+    PasswordResetRequest, PasswordResetConfirmRequest, PasswordChangeRequest,
 )
+from email_auth import email_auth_service
 from payments import PaymentEngine
 from security import (
     verify_bridge_webhook, verify_meta_webhook, rate_limit, sanitize_text, sanitize_phone,
@@ -148,6 +153,10 @@ async def lifespan(app: FastAPI):
     logger.info("[v] Initializing WhatsApp Agent Platform...")
     await init_db()
     logger.info("[v] Database tables created/verified")
+
+    from db import register_loop_models
+    register_loop_models()
+    logger.info("[v] Phase 3 loop models registered")
     
     # Initialize state machine via get_state_machine() (handles Redis fallback)
     sm = get_state_machine()
@@ -182,6 +191,28 @@ async def lifespan(app: FastAPI):
         logger.info("[v] Drip campaign message sender wired to WhatsApp bridge")
     except Exception as e:
         logger.warning(f"Drip campaign message sender not wired: {e}")
+
+    # Wire up Phase 3 automation loop message senders
+    try:
+        from lead_funnel import lead_funnel
+        lead_funnel.message_sender = _send_whatsapp_via_bridge
+        logger.info("[v] Lead funnel message sender wired to WhatsApp bridge")
+    except Exception as e:
+        logger.warning(f"Lead funnel message sender not wired: {e}")
+
+    try:
+        from appointment_nurture import appointment_nurture
+        appointment_nurture.message_sender = _send_whatsapp_via_bridge
+        logger.info("[v] Appointment nurture message sender wired to WhatsApp bridge")
+    except Exception as e:
+        logger.warning(f"Appointment nurture message sender not wired: {e}")
+
+    try:
+        from reengagement_loop import reengagement_loop
+        reengagement_loop.message_sender = _send_whatsapp_via_bridge
+        logger.info("[v] Re-engagement loop message sender wired to WhatsApp bridge")
+    except Exception as e:
+        logger.warning(f"Re-engagement loop message sender not wired: {e}")
 
     # Auto-start WhatsApp bridge if configured
     try:
@@ -235,11 +266,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount frontend static files
+# Mount frontend static files (disabled in terminal-only mode)
 _FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
-if os.path.exists(_FRONTEND_DIR):
+if not os.getenv("WAP_TERMINAL_MODE") and os.path.exists(_FRONTEND_DIR):
     app.mount("/frontend", StaticFiles(directory=_FRONTEND_DIR, html=True), name="frontend")
     logger.info(f"[v] Frontend mounted at /frontend from {_FRONTEND_DIR}")
+elif os.getenv("WAP_TERMINAL_MODE"):
+    logger.info("[i] Frontend disabled (terminal-only mode)")
 
 # ---------------------------------------------------------------------------
 # Schemas
@@ -280,7 +313,15 @@ class SignupRequest(BaseModel):
 
 @app.get("/")
 async def root():
-    """Serve the landing page"""
+    """Serve API status (no frontend in terminal mode)"""
+    if os.getenv("WAP_TERMINAL_MODE"):
+        return {
+            "status": "ok",
+            "message": "WhatsApp Agent Platform API running in terminal mode.",
+            "docs": "/docs",
+            "health": "/health",
+            "terminal_cli": "run wap-cli.py from project root",
+        }
     index_path = os.path.join(_FRONTEND_DIR, "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)
@@ -468,9 +509,21 @@ async def meta_webhook_verify(request: Request):
 async def webhook(request: Request):
     """WhatsApp webhook — handles messages + status updates (sent/delivered/read/failed)."""
     body = await request.body()
-    signature = request.headers.get("X-Bridge-Signature") or request.headers.get("X-Hub-Signature-256")
-    if not verify_bridge_webhook(body, signature):
-        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+    bridge_sig = request.headers.get("X-Bridge-Signature")
+    meta_sig = request.headers.get("X-Hub-Signature-256")
+
+    if bridge_sig:
+        if not verify_bridge_webhook(body, bridge_sig):
+            logger.warning("[!] Invalid bridge webhook signature")
+            raise HTTPException(status_code=401, detail="Invalid bridge webhook signature")
+    elif meta_sig:
+        if not verify_meta_webhook(None, None, None, meta_sig, body):
+            logger.warning("[!] Invalid Meta webhook signature")
+            raise HTTPException(status_code=401, detail="Invalid Meta webhook signature")
+    else:
+        logger.warning("[!] Webhook received without signature")
+        raise HTTPException(status_code=401, detail="Missing webhook signature")
+
     await rate_limit(request)
 
     data = await request.json()
@@ -493,11 +546,25 @@ async def webhook(request: Request):
     phone_number = sanitize_phone(data.get("from") or data.get("phone_number", ""))
     message = sanitize_text(data.get("body") or data.get("text") or data.get("message", ""))
     client_id = data.get("client_id") or 1
+    media_data = data.get("mediaData")
+    media_mimetype = data.get("mediaMimetype")
+
+    # Compliance: check opt-out
+    try:
+        from services.compliance import compliance_manager
+        if phone_number and message:
+            if compliance_manager.is_opt_out_message(message):
+                compliance_manager.record_opt_out(phone_number, client_id, source="whatsapp_webhook")
+                from lead_funnel import lead_funnel
+                await lead_funnel.on_opt_out(phone_number, client_id)
+                return {"status": "ok", "reply": "You have been unsubscribed. You will not receive further messages."}
+    except Exception as e:
+        logger.warning(f"Opt-out check error: {e}")
 
     reply = None
-    if phone_number and message:
+    if phone_number and (message or media_data):
         orchestrator: AgentOrchestrator = app.state.orchestrator
-        reply = await orchestrator.process_message(phone_number, message, client_id)
+        reply = await orchestrator.process_message(phone_number, message, client_id, media_data, media_mimetype)
         # 1.7 Push real-time notification to owner dashboard
         try:
             await manager.broadcast(client_id, {
@@ -553,11 +620,17 @@ async def auth_register(req: RegisterRequest, request: Request):
     await log_action(user.id, "register", "user", str(user.id),
                      ip_address=request.client.host if request.client else None)
     token = create_access_token(user.id, user.email, user.role, user.client_id)
+    # Trigger email verification flow (best-effort — don't block registration)
+    try:
+        await email_auth_service.request_email_verification(user.email)
+    except Exception as e:
+        logger.warning(f"Failed to send verification email to {user.email}: {e}")
     return TokenResponse(
         access_token=token,
         expires_in=JWT_EXPIRE_HOURS * 3600,
         user={"id": user.id, "email": user.email, "full_name": user.full_name,
-              "role": user.role, "client_id": user.client_id},
+              "role": user.role, "client_id": user.client_id,
+              "is_email_verified": user.is_email_verified},
     )
 
 
@@ -574,7 +647,8 @@ async def auth_login(req: LoginRequest, request: Request):
         access_token=token,
         expires_in=JWT_EXPIRE_HOURS * 3600,
         user={"id": user.id, "email": user.email, "full_name": user.full_name,
-              "role": user.role, "client_id": user.client_id},
+              "role": user.role, "client_id": user.client_id,
+              "is_email_verified": user.is_email_verified},
     )
 
 
@@ -602,7 +676,8 @@ async def auth_me(user: User = Depends(get_current_user)):
     """Get the current authenticated user."""
     return {"id": user.id, "email": user.email, "full_name": user.full_name,
             "role": user.role, "client_id": user.client_id,
-            "api_key": user.api_key, "last_login": str(user.last_login or "")}
+            "api_key": user.api_key, "last_login": str(user.last_login or ""),
+            "is_email_verified": user.is_email_verified}
 
 
 @app.post("/auth/logout")
@@ -614,6 +689,115 @@ async def auth_logout(request: Request, credentials: HTTPAuthorizationCredential
     payload = decode_token(credentials.credentials)
     blacklist_token(payload.get("jti", ""))
     return {"status": "ok", "message": "Logged out"}
+
+
+# ---------------------------------------------------------------------------
+# Email / OTP Authentication Endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/auth/email/verify/request")
+async def email_verify_request(req: EmailVerifyRequest, request: Request):
+    """Request a verification email be sent to the given address."""
+    await rate_limit(request)
+    result = await email_auth_service.request_email_verification(req.email)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message", "Failed to send verification email"))
+    return result
+
+
+@app.post("/auth/email/verify/confirm")
+async def email_verify_confirm(req: EmailVerifyConfirmRequest, request: Request):
+    """Confirm email verification using a token from the verification link."""
+    await rate_limit(request)
+    result = await email_auth_service.verify_email(req.token)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message", "Verification failed"))
+    return result
+
+
+@app.get("/auth/verify-email/{token}")
+async def email_verify_link(token: str, request: Request):
+    """Handle the verification link clicked from the email (redirects to frontend)."""
+    await rate_limit(request)
+    result = await email_auth_service.verify_email(token)
+    if result.get("status") == "error":
+        return RedirectResponse(url=f"{settings.frontend_url}/login?verification=failed")
+    return RedirectResponse(url=f"{settings.frontend_url}/login?verification=success")
+
+
+@app.post("/auth/otp/request")
+async def otp_request(req: OTPRequest, request: Request):
+    """Request a one-time password (OTP) for passwordless login."""
+    await rate_limit(request)
+    result = await email_auth_service.request_otp(req.email)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message", "Failed to send OTP"))
+    return result
+
+
+@app.post("/auth/otp/verify")
+async def otp_verify(req: OTPVerifyRequest, request: Request):
+    """Verify an OTP and return a JWT access token (passwordless login)."""
+    await rate_limit(request)
+    result = await email_auth_service.verify_otp(req.email, req.otp)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=401, detail=result.get("message", "Invalid OTP"))
+    await log_action(result["user"]["id"], "otp_login", "user", str(result["user"]["id"]),
+                     ip_address=request.client.host if request.client else None)
+    return result
+
+
+@app.post("/auth/password/reset/request")
+async def password_reset_request(req: PasswordResetRequest, request: Request):
+    """Request a password-reset link be sent to the email."""
+    await rate_limit(request)
+    result = await email_auth_service.request_password_reset(req.email)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message", "Failed to send reset link"))
+    return result
+
+
+@app.post("/auth/password/reset/confirm")
+async def password_reset_confirm(req: PasswordResetConfirmRequest, request: Request):
+    """Reset a password using a valid reset token."""
+    await rate_limit(request)
+    result = await email_auth_service.reset_password(req.token, req.password)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message", "Password reset failed"))
+    return result
+
+
+@app.post("/auth/password/change")
+async def password_change(req: PasswordChangeRequest, request: Request, user: User = Depends(get_current_user)):
+    """Change the current user's password (requires current password)."""
+    from auth import verify_password, hash_password
+    from db import async_session
+    from sqlalchemy import select
+
+    if not verify_password(req.current_password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    if len(req.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
+
+    async with async_session() as session:
+        db_user = (await session.execute(select(User).where(User.id == user.id))).scalar_one_or_none()
+        if not db_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        db_user.password_hash = hash_password(req.new_password)
+        await session.commit()
+
+    await log_action(user.id, "password_change", "user", str(user.id),
+                     ip_address=request.client.host if request.client else None)
+    return {"status": "ok", "message": "Password changed successfully"}
+
+
+@app.get("/auth/email/status")
+async def email_verification_status(email: str, user: User = Depends(get_current_user)):
+    """Check whether an email is verified (authenticated)."""
+    result = await email_auth_service.get_verification_status(email)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=404, detail=result.get("message", "User not found"))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -764,6 +948,590 @@ async def my_stats(user: User = Depends(get_current_user)):
         if p.client_id == cid:
             return business_manager.get_business_stats(p.id)
     return {"total_orders": 0, "pending": 0, "completed": 0, "revenue": 0, "avg_order_value": 0}
+
+
+# ---------------------------------------------------------------------------
+# Bulk Upload Endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/api/bulk/upload-contacts")
+async def bulk_upload_contacts(request: Request, user: User = Depends(get_current_user)):
+    """Upload CSV/Excel file with contacts. Requires opt_in column for compliance."""
+    from bulk_upload import bulk_upload, ContactUploadResult
+    import uuid
+
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        raise HTTPException(status_code=400, detail="file is required")
+
+    content = await file.read()
+    filename = getattr(file, "filename", "upload.csv")
+    default_source = form.get("source", "bulk_upload")
+
+    result = bulk_upload.parse_contacts_file(content, filename, default_source)
+
+    # Save valid contacts to DB
+    saved = 0
+    from db import async_session, Contact
+    from sqlalchemy import select
+    cid = _get_my_client_id(user)
+    async with async_session() as session:
+        for contact_data in result.contacts:
+            existing = await session.execute(
+                select(Contact).where(Contact.phone_number == contact_data["phone_number"],
+                                      Contact.client_id == cid)
+            )
+            db_contact = existing.scalar_one_or_none()
+            if db_contact:
+                for key, value in contact_data.items():
+                    if key != "phone_number" and hasattr(db_contact, key):
+                        setattr(db_contact, key, value)
+                db_contact.updated_at = datetime.now(timezone.utc)
+            else:
+                db_contact = Contact(client_id=cid, **{k: v for k, v in contact_data.items() if k != "client_id" and hasattr(Contact, k)})
+                session.add(db_contact)
+            saved += 1
+        await session.commit()
+
+    return {
+        "status": "processed",
+        "total_rows": result.total_rows,
+        "successful": saved,
+        "failed": result.failed,
+        "skipped_duplicates": result.skipped_duplicates,
+        "errors": result.errors[:10],
+    }
+
+
+@app.post("/api/bulk/upload-catalog")
+async def bulk_upload_catalog(request: Request, user: User = Depends(get_current_user)):
+    """Upload CSV/Excel file with catalog items."""
+    from bulk_upload import bulk_upload
+    import uuid
+
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        raise HTTPException(status_code=400, detail="file is required")
+
+    content = await file.read()
+    filename = getattr(file, "filename", "catalog.csv")
+
+    from business_profiles import business_manager
+    cid = _get_my_client_id(user)
+    profile = None
+    for p in business_manager.profiles.values():
+        if p.client_id == cid:
+            profile = p
+            break
+
+    if not profile:
+        raise HTTPException(status_code=400, detail="Create business profile first")
+
+    result = bulk_upload.parse_catalog_file(content, filename, profile.id)
+
+    # Save items to business profile
+    saved = 0
+    for item_data in result["items"]:
+        from business_profiles import CatalogItem
+        item = CatalogItem(
+            id=str(uuid.uuid4())[:8],
+            business_id=profile.id,
+            **item_data
+        )
+        business_manager.add_catalog_item(profile.id, item)
+        saved += 1
+
+    return {
+        "status": "processed",
+        "total": result["total"],
+        "saved": saved,
+        "errors": result["errors"][:10],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Template Management Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/templates")
+async def list_templates(client_id: int = 1, status: str = "", user: User = Depends(get_current_user)):
+    """List message templates for the current user."""
+    from templates import template_manager
+    cid = _get_my_client_id(user)
+    if status:
+        templates = template_manager.get_templates_by_status(cid, status)
+    else:
+        templates = template_manager.get_templates_by_client(cid)
+    return {"templates": [t.to_dict() for t in templates]}
+
+
+@app.post("/api/templates")
+async def create_template(request: Request, user: User = Depends(get_current_user)):
+    """Create a new message template."""
+    from templates import template_manager, TemplateCategory
+    body = await request.json()
+    name = body.get("name", "")
+    category = body.get("category", "custom")
+    content = body.get("content", "")
+    if not name or not content:
+        raise HTTPException(status_code=400, detail="name and content required")
+    cid = _get_my_client_id(user)
+    template = template_manager.create_template(
+        client_id=cid,
+        name=name,
+        category=category,
+        content=content,
+        language=body.get("language", "en"),
+        tags=body.get("tags", []),
+    )
+    return {"status": "created", "template": template.to_dict()}
+
+
+@app.get("/api/templates/{template_id}")
+async def get_template(template_id: str, user: User = Depends(get_current_user)):
+    """Get a specific template."""
+    from templates import template_manager
+    template = template_manager.get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return template.to_dict()
+
+
+@app.put("/api/templates/{template_id}")
+async def update_template(template_id: str, request: Request, user: User = Depends(get_current_user)):
+    """Update a template."""
+    from templates import template_manager
+    body = await request.json()
+    template = template_manager.update_template(template_id, **body)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return {"status": "updated", "template": template.to_dict()}
+
+
+@app.delete("/api/templates/{template_id}")
+async def delete_template(template_id: str, user: User = Depends(get_current_user)):
+    """Delete a template."""
+    from templates import template_manager
+    if template_manager.delete_template(template_id):
+        return {"status": "deleted"}
+    raise HTTPException(status_code=404, detail="Template not found")
+
+
+@app.post("/api/templates/{template_id}/render")
+async def render_template(template_id: str, request: Request, user: User = Depends(get_current_user)):
+    """Render a template with variables."""
+    from templates import template_manager
+    body = await request.json()
+    template = template_manager.get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    rendered = template_manager.render_template(template_id, body.get("variables", {}))
+    return {"rendered": rendered}
+
+
+@app.get("/api/templates/profession/{business_type}")
+async def get_profession_templates(business_type: str):
+    """List pre-built profession-specific message templates for a business type.
+
+    Public endpoint - no auth required.
+    Returns all categories (welcome, appointment_confirmed, appointment_reminder, order_confirmed, etc.)
+    with variable placeholders ready for rendering.
+    """
+    from message_templates import template_engine
+    tmpls = template_engine.get_templates_for_business(business_type)
+    if not tmpls:
+        available = template_engine.get_all_business_types()
+        raise HTTPException(
+            status_code=400,
+            detail=f"No templates for '{business_type}'. Available: {', '.join(available)}",
+        )
+    return {
+        "business_type": business_type,
+        "templates": [t.to_dict() for t in tmpls],
+        "supported_variables": {k: v.description for k, v in
+            __import__("message_templates").SUPPORTED_VARIABLES.items()
+            if k in {var for t in tmpls for var in t.variables}},
+    }
+
+
+class TemplateSendRequest(BaseModel):
+    business_type: str
+    category: str
+    variables: Dict[str, str] = {}
+    to_phone: str = ""
+    use_cloud_api: bool = False
+    template_id: str = ""
+
+
+@app.post("/api/templates/send")
+async def send_profession_template(req: TemplateSendRequest, request: Request,
+                                     user: User = Depends(get_current_user)):
+    """Render a profession-specific template and send to a WhatsApp contact.
+
+    - Renders {{variables}} into the template text (and image_url if supported)
+    - Sends text + optional image via Cloud API (if use_cloud_api=True) or local bridge
+    - Falls back to rendering-only if no WhatsApp channel is configured
+    """
+    await rate_limit(request, str(req.client_id) if hasattr(req, 'client_id') else "1")
+    from message_templates import template_engine
+
+    if req.template_id:
+        tmpl = template_engine.get_template(req.template_id)
+        if not tmpl:
+            raise HTTPException(status_code=404, detail=f"Template '{req.template_id}' not found")
+        rendered = template_engine.render(req.template_id, req.variables)
+        image_url = tmpl.image_url
+        if image_url:
+            for key, value in req.variables.items():
+                image_url = image_url.replace("{{" + key + "}}", str(value))
+        text = rendered
+    else:
+        if not req.business_type or not req.category:
+            raise HTTPException(status_code=400, detail="business_type and category (or template_id) required")
+        result = template_engine.render_by_profession(req.business_type, req.category, req.variables)
+        if result.get("status") != "ok":
+            raise HTTPException(status_code=404, detail=result.get("message", "Template not found"))
+        text = result["rendered_text"]
+        image_url = result.get("image_url")
+
+    if not req.to_phone:
+        return {
+            "status": "rendered",
+            "rendered_text": text,
+            "image_url": image_url,
+            "message": "No phone number provided; template rendered only",
+        }
+
+    cid = _get_my_client_id(user)
+    send_result: Dict[str, Any] = {"status": "rendered", "rendered_text": text, "image_url": image_url}
+
+    if req.use_cloud_api:
+        config = cloud_api.get_config(cid)
+        if config:
+            if image_url:
+                send_result["send_result"] = cloud_api.send_image(cid, req.to_phone, image_url, caption=text)
+            else:
+                send_result["send_result"] = cloud_api.send_free_text(cid, req.to_phone, text)
+        else:
+            send_result["send_error"] = "Cloud API not configured"
+    else:
+        from whatsapp_connector import whatsapp_connector
+        status = whatsapp_connector.get_status()
+        if status.get("connected"):
+            bridge = whatsapp_connector.get_status()
+            bridge_url = settings.whatsapp_bridge_url
+            import httpx
+            try:
+                endpoint = "/send-image" if image_url else "/send"
+                payload = {"to": req.to_phone}
+                if image_url:
+                    payload["image_url"] = image_url
+                    payload["caption"] = text
+                else:
+                    payload["message"] = text
+                async with httpx.AsyncClient(timeout=15) as http_client:
+                    resp = await http_client.post(f"{bridge_url}{endpoint}", json=payload)
+                    send_result["send_result"] = resp.json() if resp.status_code == 200 else \
+                        {"status": "error", "message": resp.text}
+            except Exception as e:
+                send_result["send_error"] = str(e)
+        else:
+            send_result["send_error"] = "WhatsApp bridge not connected"
+
+    if send_result.get("send_result", {}).get("status") == "sent":
+        send_result["status"] = "sent"
+    elif send_result.get("send_error"):
+        send_result["status"] = "rendered"
+    return send_result
+
+
+# ---------------------------------------------------------------------------
+# WhatsApp Cloud API Connection
+# ---------------------------------------------------------------------------
+
+@app.post("/api/whatsapp/cloud/connect")
+async def connect_cloud_whatsapp(request: Request, user: User = Depends(get_current_user)):
+    """Connect WhatsApp via Cloud API (official Meta API). Stores access token + phone number ID."""
+    from cloud_api import cloud_api
+    body = await request.json()
+    access_token = body.get("access_token", "")
+    phone_number_id = body.get("phone_number_id", "")
+    business_account_id = body.get("business_account_id")
+    app_id = body.get("app_id")
+    webhook_verify_token = body.get("webhook_verify_token")
+    if not access_token or not phone_number_id:
+        raise HTTPException(status_code=400, detail="access_token and phone_number_id required")
+    cid = _get_my_client_id(user)
+    config = cloud_api.register_client(cid, access_token, phone_number_id,
+                                       business_account_id, app_id, webhook_verify_token)
+    return {"status": "connected", "config": {
+        "client_id": config.client_id,
+        "phone_number_id": config.phone_number_id,
+        "tier": config.tier,
+        "is_active": config.is_active,
+    }}
+
+
+@app.get("/api/whatsapp/cloud/status")
+async def cloud_whatsapp_status(user: User = Depends(get_current_user)):
+    """Check Cloud API connection status."""
+    from cloud_api import cloud_api
+    cid = _get_my_client_id(user)
+    config = cloud_api.get_config(cid)
+    if not config:
+        return {"connected": False, "message": "Not configured"}
+    is_valid = cloud_api.verify_token(cid, config.access_token)
+    tier_info = cloud_api.get_tier_limits(cid)
+    quality = cloud_api.get_quality_rating(cid)
+    return {
+        "connected": is_valid,
+        "phone_number_id": config.phone_number_id,
+        "tier": tier_info.get("tier"),
+        "daily_limit": tier_info.get("daily_limit"),
+        "quality_rating": quality,
+        "is_active": config.is_active,
+    }
+
+
+@app.post("/api/whatsapp/cloud/disconnect")
+async def disconnect_cloud_whatsapp(user: User = Depends(get_current_user)):
+    """Disconnect Cloud API."""
+    from cloud_api import cloud_api
+    cid = _get_my_client_id(user)
+    if cloud_api.remove_config(cid):
+        return {"status": "disconnected"}
+    return {"status": "not_connected"}
+
+
+@app.post("/api/whatsapp/cloud/send-template")
+async def send_template_message(request: Request, user: User = Depends(get_current_user)):
+    """Send a template message via Cloud API."""
+    from cloud_api import cloud_api
+    body = await request.json()
+    to = body.get("to", "")
+    template_name = body.get("template_name", "")
+    language = body.get("language", "en")
+    components = body.get("components")
+    if not to or not template_name:
+        raise HTTPException(status_code=400, detail="to and template_name required")
+    cid = _get_my_client_id(user)
+    result = cloud_api.send_template_message(cid, to, template_name, language, components)
+    return result
+
+
+@app.post("/api/whatsapp/cloud/send-text")
+async def send_free_text(request: Request, user: User = Depends(get_current_user)):
+    """Send a free-text message via Cloud API (within 24h session window)."""
+    from cloud_api import cloud_api
+    body = await request.json()
+    to = body.get("to", "")
+    message = body.get("message", "")
+    reply_to = body.get("reply_to_message_id")
+    if not to or not message:
+        raise HTTPException(status_code=400, detail="to and message required")
+    cid = _get_my_client_id(user)
+    result = cloud_api.send_free_text(cid, to, message, reply_to)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Bulk Messaging Endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/api/bulk/send")
+async def bulk_send(request: Request, user: User = Depends(get_current_user)):
+    """Send a message to multiple contacts with rate limiting and compliance checks."""
+    from cloud_api import cloud_api
+    from analytics import analytics as analytics_engine
+    import asyncio
+
+    body = await request.json()
+    to_numbers = body.get("to", [])
+    message = body.get("message", "")
+    template_name = body.get("template_name")
+    template_vars = body.get("template_variables", {})
+    delay_seconds = float(body.get("delay_seconds", 1.0))
+    campaign_id = body.get("campaign_id")
+
+    if not to_numbers:
+        raise HTTPException(status_code=400, detail="to list is required")
+    if not message and not template_name:
+        raise HTTPException(status_code=400, detail="message or template_name required")
+
+    cid = _get_my_client_id(user)
+    config = cloud_api.get_config(cid)
+    if not config:
+        raise HTTPException(status_code=400, detail="WhatsApp Cloud API not connected. Connect first.")
+
+    tier_info = cloud_api.get_tier_limits(cid)
+    daily_limit = tier_info.get("daily_limit", 250)
+
+    sent_count = 0
+    failed = []
+    results = []
+
+    for phone in to_numbers:
+        if sent_count >= daily_limit:
+            failed.append({"phone": phone, "error": f"Daily limit ({daily_limit}) reached"})
+            continue
+
+        if template_name:
+            from templates import template_manager
+            template = template_manager.get_template(template_id=template_name)
+            if template:
+                rendered = template_manager.render_template(template_name, template_vars)
+                result = cloud_api.send_free_text(cid, phone, rendered)
+            else:
+                result = {"status": "error", "message": "Template not found"}
+        else:
+            result = cloud_api.send_free_text(cid, phone, message)
+
+        if result.get("status") == "sent":
+            wamid = result.get("wamid", "")
+            analytics_engine.record_event(
+                client_id=cid,
+                phone_number=phone,
+                direction="outbound",
+                message_type="template" if template_name else "free_text",
+                template_id=template_name,
+                campaign_id=campaign_id,
+                status="sent",
+                wamid=wamid,
+            )
+            sent_count += 1
+            results.append({"phone": phone, "status": "sent", "wamid": wamid})
+        else:
+            failed.append({"phone": phone, "error": result.get("message", result.get("error", "Unknown"))})
+
+        if delay_seconds > 0 and sent_count < len(to_numbers):
+            await asyncio.sleep(delay_seconds)
+
+    return {
+        "status": "completed",
+        "sent": sent_count,
+        "failed": len(failed),
+        "daily_limit": daily_limit,
+        "results": results,
+        "errors": failed[:20],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Analytics Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/analytics/summary")
+async def analytics_summary(days: int = 30, user: User = Depends(get_current_user)):
+    """Get analytics summary for the last N days."""
+    from analytics import analytics as analytics_engine
+    cid = _get_my_client_id(user)
+    return analytics_engine.get_summary(cid, days)
+
+
+@app.get("/api/analytics/daily")
+async def analytics_daily(days: int = 7, user: User = Depends(get_current_user)):
+    """Get daily breakdown of message stats."""
+    from analytics import analytics as analytics_engine
+    cid = _get_my_client_id(user)
+    return {"daily_stats": analytics_engine.get_daily_stats(cid, days)}
+
+
+@app.get("/api/analytics/events")
+async def analytics_events(days: int = 7, status: str = "", user: User = Depends(get_current_user)):
+    """Get raw message events."""
+    from analytics import analytics as analytics_engine
+    cid = _get_my_client_id(user)
+    events = analytics_engine.get_events(cid, days, status if status else None)
+    return {"events": events, "count": len(events)}
+
+
+@app.get("/api/analytics/templates/stats")
+async def analytics_template_stats(user: User = Depends(get_current_user)):
+    """Get template usage statistics."""
+    from templates import template_manager
+    cid = _get_my_client_id(user)
+    return template_manager.get_stats(cid)
+
+
+# ---------------------------------------------------------------------------
+# Excel Export Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/export/analytics")
+async def export_analytics(days: int = 30, user: User = Depends(get_current_user)):
+    """Export analytics report as Excel file."""
+    from analytics import analytics as analytics_engine
+    from excel_export import excel_export
+    cid = _get_my_client_id(user)
+    stats = analytics_engine.get_summary(cid, days)
+    daily_stats = analytics_engine.get_daily_stats(cid, days)
+    events = analytics_engine.get_events(cid, days)
+    xlsx_bytes = excel_export.export_analytics_report(cid, days, stats, daily_stats, events)
+    from fastapi.responses import Response
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=analytics_report_{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"},
+    )
+
+
+@app.get("/api/export/leads")
+async def export_leads(user: User = Depends(get_current_user)):
+    """Export leads as Excel file."""
+    from excel_export import excel_export
+    from lead_gen import lead_gen_agent
+    cid = _get_my_client_id(user)
+    leads = await lead_gen_agent.get_leads()
+    xlsx_bytes = excel_export.export_leads_report(leads)
+    from fastapi.responses import Response
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=leads_{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# AI Summary Endpoint
+# ---------------------------------------------------------------------------
+
+@app.post("/api/ai/analytics-summary")
+async def ai_analytics_summary(request: Request, user: User = Depends(get_current_user)):
+    """Generate an AI-assisted plain-language summary of analytics performance."""
+    from analytics import analytics as analytics_engine
+    from llm_setup import get_llm
+    cid = _get_my_client_id(user)
+    body = await request.json()
+    days = body.get("days", 7)
+
+    stats = analytics_engine.get_summary(cid, days)
+    daily = analytics_engine.get_daily_stats(cid, days)
+
+    prompt = f"""You are a WhatsApp marketing analytics assistant. Summarize the following performance data in plain language for a business owner. Be specific about trends, highlight problems (low delivery, low read rate), and suggest actionable improvements.
+
+Period: last {days} days
+Stats: {json.dumps(stats)}
+Daily trend: {json.dumps(daily[:5])}
+
+Keep it under 150 words. Use Hinglish mix if appropriate."""
+
+    try:
+        llm = get_llm()
+        if hasattr(llm, "invoke"):
+            response = await asyncio.to_thread(llm.invoke, prompt)
+            summary = response.content if hasattr(response, "content") else str(response)
+        else:
+            summary = f"Analytics Summary ({days} days): {stats['total_sent']} sent, {stats['delivery_rate']}% delivery rate, {stats['read_rate']}% read rate, {stats['reply_rate']}% reply rate."
+    except Exception as e:
+        summary = f"Analytics Summary ({days} days): {stats['total_sent']} sent, {stats['delivery_rate']}% delivery rate. (AI summary failed: {e})"
+
+    return {
+        "summary": summary,
+        "stats": stats,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1798,37 +2566,47 @@ async def plugin_install(request: Request, user: User = Depends(get_current_user
 async def get_bridge_qr():
     """Get QR code from the WhatsApp bridge"""
     from whatsapp_connector import whatsapp_connector
-    return whatsapp_connector.get_qr()
+    return await run_in_threadpool(whatsapp_connector.get_qr)
 
 
 @app.post("/api/whatsapp/bridge/start")
 async def start_bridge():
     """Start the WhatsApp bridge automatically"""
     from whatsapp_connector import whatsapp_connector
-    return whatsapp_connector.start_bridge()
+    return await run_in_threadpool(whatsapp_connector.start_bridge)
 
 
 @app.post("/api/whatsapp/bridge/stop")
 async def stop_bridge():
     """Stop the WhatsApp bridge"""
     from whatsapp_connector import whatsapp_connector
-    return whatsapp_connector.stop_bridge()
+    return await run_in_threadpool(whatsapp_connector.stop_bridge)
 
 
 @app.get("/api/whatsapp/bridge/status")
 async def bridge_status():
     """Get WhatsApp bridge status"""
     from whatsapp_connector import whatsapp_connector
-    return whatsapp_connector.get_status()
+    return await run_in_threadpool(whatsapp_connector.get_status)
 
 
 @app.post("/api/whatsapp/bridge/refresh")
 async def bridge_refresh():
     """Refresh the WhatsApp bridge QR code by restarting or reinitializing the bridge."""
     from whatsapp_connector import whatsapp_connector
-    result = whatsapp_connector.refresh_qr()
+    result = await run_in_threadpool(whatsapp_connector.refresh_qr)
     if result.get("status") == "error":
         raise HTTPException(status_code=503, detail=result.get("message", "Failed to refresh bridge"))
+    return result
+
+
+@app.post("/api/whatsapp/bridge/reset")
+async def bridge_reset():
+    """Reset the WhatsApp bridge session and force a new QR scan."""
+    from whatsapp_connector import whatsapp_connector
+    result = await run_in_threadpool(whatsapp_connector.reset_bridge)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=503, detail=result.get("message", "Failed to reset bridge"))
     return result
 
 
@@ -2269,10 +3047,35 @@ async def send_to_contact(request: Request, user: User = Depends(get_current_use
 
 
 # ---------------------------------------------------------------------------
+# Phase 3 Automation Loops — WhatsApp Sender
+# ---------------------------------------------------------------------------
+
+async def _send_whatsapp_via_bridge(phone_number: str, message: str) -> bool:
+    """Send an outbound WhatsApp message via the bridge for automation loops."""
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                f"{settings.whatsapp_bridge_url}/send",
+                json={"to": phone_number, "message": message},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                logger.info(f"[v] Automation loop message sent to {phone_number}")
+                return True
+            else:
+                logger.error(f"Automation loop send failed for {phone_number}: {resp.text}")
+                return False
+    except Exception as e:
+        logger.error(f"Automation loop send error for {phone_number}: {e}")
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Drip Campaign — Message Sender Wiring
 # ---------------------------------------------------------------------------
 
-async def _campaign_message_sender(channel: str, contact_id: str, content: str) -> bool:
+async def _campaign_message_sender(channel: str, contact_id: str, content: str, client_id: int = 1) -> bool:
     """
     Message sender callback for the drip campaign engine.
     Sends a message via the WhatsApp bridge, respecting rate limits.
@@ -2287,7 +3090,7 @@ async def _campaign_message_sender(channel: str, contact_id: str, content: str) 
     # Resolve phone number from contact_id
     phone = contact_id
     async with async_session() as session:
-        result = await session.execute(select(Contact).where(Contact.id == contact_id))
+        result = await session.execute(select(Contact).where(Contact.id == contact_id, Contact.client_id == client_id))
         contact = result.scalar_one_or_none()
         if contact:
             phone = contact.phone_number
@@ -2406,7 +3209,8 @@ async def crm_add_note(contact_id: int, request: Request, user: User = Depends(g
 
 @app.get("/api/appointments")
 async def list_appointments(client_id: int = 1, date: str = "", user: User = Depends(get_current_user)):
-    """List appointments for a business, optionally filtered by date."""
+    """List appointments for a business, optionally filtered by date.
+    Includes sector-specific metadata (symptoms, service_type, stylist, etc.)."""
     async for session in get_session():
         from sqlalchemy import select
         from db import Appointment
@@ -2427,6 +3231,7 @@ async def list_appointments(client_id: int = 1, date: str = "", user: User = Dep
                     "appointment_time": a.appointment_time,
                     "duration_minutes": a.duration_minutes,
                     "status": a.status,
+                    "metadata": a.sector_metadata or {},
                     "created_at": a.created_at.isoformat(),
                 }
                 for a in appts
@@ -2436,7 +3241,13 @@ async def list_appointments(client_id: int = 1, date: str = "", user: User = Dep
 
 @app.post("/api/appointments")
 async def create_appointment(request: Request, user: User = Depends(get_current_user)):
-    """Create an appointment (used by AI slot-filling flow)."""
+    """Create an appointment (used by AI slot-filling flow).
+
+    Accepts sector-specific fields in the ``sector_fields`` dict, e.g.:
+      doctor → {"symptoms": "...", "patient_name": "...", "age": 30}
+      ca     → {"pan_number": "...", "financial_year": "...", "service_type": "ITR Filing"}
+      salon  → {"stylist": "...", "hair_type": "...", "gender": "female"}
+    """
     body = await request.json()
     required = ["phone_number", "appointment_date", "appointment_time"]
     missing = [f for f in required if not body.get(f)]
@@ -2448,7 +3259,7 @@ async def create_appointment(request: Request, user: User = Depends(get_current_
         cid = _get_my_client_id(user)
         appt = Appointment(
             client_id=cid,
-            phone_number=body["phone_number"],
+            phone_number=sanitize_phone(body["phone_number"]),
             contact_id=body.get("contact_id"),
             title=body.get("title", "Appointment"),
             description=body.get("description", ""),
@@ -2456,10 +3267,16 @@ async def create_appointment(request: Request, user: User = Depends(get_current_
             appointment_time=body["appointment_time"],
             duration_minutes=body.get("duration_minutes", 30),
             status=body.get("status", "scheduled"),
+            metadata={
+                "business_type": body.get("business_type", "general"),
+                "sector_fields": body.get("sector_fields", {}),
+            },
         )
         session.add(appt)
         await session.commit()
         await session.refresh(appt)
+
+        # Broadcast real-time notification
         try:
             await manager.broadcast(cid, {
                 "type": "appointment_created",
@@ -2467,20 +3284,93 @@ async def create_appointment(request: Request, user: User = Depends(get_current_
                 "phone_number": appt.phone_number,
                 "appointment_date": appt.appointment_date,
                 "appointment_time": appt.appointment_time,
+                "business_type": appt.sector_metadata.get("business_type", "general"),
             })
         except Exception:
             pass
+
+        # Auto-send WhatsApp confirmation template
+        appointment_type = appt.sector_metadata.get("business_type", "general")
+        asyncio.create_task(_send_appointment_template(
+            appt, appointment_type, "appointment_confirmed", cid,
+        ))
+
         return {
             "id": appt.id,
             "status": appt.status,
             "appointment_date": appt.appointment_date,
             "appointment_time": appt.appointment_time,
+            "metadata": appt.sector_metadata,
         }
+
+
+async def _send_appointment_template(appt, business_type: str, category: str, client_id: int):
+    """Background task: render and send an appointment-related WhatsApp template."""
+    try:
+        from message_templates import template_engine
+        from business_profiles import business_manager
+        from cloud_api import cloud_api
+        variables = {
+            "customer_name": appt.description or "",
+            "business_name": "",
+            "date": appt.appointment_date,
+            "time": appt.appointment_time,
+            "service": appt.title or "",
+            "order_id": str(appt.id),
+            "duration": f"{appt.duration_minutes} min",
+            "phone": "",
+        }
+        sector = appt.sector_metadata.get("sector_fields", {}) if appt.sector_metadata else {}
+        variables.update({k: str(v) for k, v in sector.items()})
+
+        # Look up business name from profile
+        for p in business_manager.profiles.values():
+            if p.client_id == client_id:
+                variables["business_name"] = p.name
+                break
+
+        result = template_engine.render_by_profession(business_type, category, variables)
+        if result.get("status") != "ok":
+            return
+
+        text = result["rendered_text"]
+        image_url = result.get("image_url")
+
+        # Try Cloud API first, then bridge, then skip silently
+        try:
+            config = cloud_api.get_config(client_id)
+            if config:
+                if image_url:
+                    cloud_api.send_image(client_id, appt.phone_number, image_url, caption=text)
+                else:
+                    cloud_api.send_free_text(client_id, appt.phone_number, text)
+                return
+        except Exception:
+            pass
+
+        # Fall back to local bridge
+        try:
+            from whatsapp_connector import whatsapp_connector
+            status = whatsapp_connector.get_status()
+            if status.get("connected"):
+                if image_url:
+                    whatsapp_connector.send_image(appt.phone_number, image_url, caption=text)
+                else:
+                    whatsapp_connector.send_message(appt.phone_number, text)
+        except Exception:
+            pass
+    except Exception as e:
+        logger.warning(f"Failed to send appointment template: {e}")
 
 
 @app.put("/api/appointments/{appointment_id}/status")
 async def update_appointment_status(appointment_id: int, request: Request, user: User = Depends(get_current_user)):
-    """Update appointment status (confirmed/completed/cancelled)."""
+    """Update appointment status (confirmed/completed/cancelled).
+
+    Sends WhatsApp notifications on key transitions:
+      - confirmed → confirmation message + QR if image template exists
+      - cancelled → cancellation message
+    """
     body = await request.json()
     new_status = body.get("status", "")
     if not new_status:
@@ -2492,20 +3382,37 @@ async def update_appointment_status(appointment_id: int, request: Request, user:
         appt = result.scalar_one_or_none()
         if not appt:
             raise HTTPException(status_code=404, detail="Appointment not found")
+        old_status = appt.status
         appt.status = new_status
         appt.updated_at = datetime.now(timezone.utc)
         await session.commit()
         await session.refresh(appt)
         cid = _get_my_client_id(user)
+
+        # Broadcast status update
         try:
             await manager.broadcast(cid, {
                 "type": "appointment_updated",
                 "appointment_id": appt.id,
                 "status": appt.status,
+                "old_status": old_status,
             })
         except Exception:
             pass
-        return {"status": appt.status}
+
+        # Auto-send WhatsApp notification on status transition
+        if new_status in ("confirmed", "cancelled", "completed"):
+            cat_map = {
+                "confirmed": "appointment_confirmed",
+                "cancelled": "appointment_cancelled",
+                "completed": "follow_up",
+            }
+            bt = (appt.sector_metadata or {}).get("business_type", "general")
+            asyncio.create_task(_send_appointment_template(
+                appt, bt, cat_map[new_status], cid,
+            ))
+
+        return {"status": appt.status, "old_status": old_status}
 
 
 # ---------------------------------------------------------------------------
@@ -2618,6 +3525,303 @@ async def run_winback_campaign(request: Request, user: User = Depends(get_curren
 
 
 # ---------------------------------------------------------------------------
+# Seller CRM — Amazon / Flipkart (unified dashboard)
+# ---------------------------------------------------------------------------
+
+from services.seller.seo_audit import audit_listing as do_audit_listing
+from services.seller.price_compare import compare_product_price as do_compare_price
+from services.seller.bulk_import import import_products_csv, import_listings_csv, import_orders_csv
+from services.seller.llm_service import SellerLLMService
+from services.seller.flipkart_client import FlipkartSellerClient
+from services.seller.amazon_client import AmazonSPClient
+
+seller_llm = SellerLLMService()
+
+
+@app.get("/api/seller/dashboard")
+async def seller_dashboard(client_id: int = 1):
+    """Seller CRM dashboard stats."""
+    async for session in get_session():
+        from sqlalchemy import select, func
+        from db import SellerProduct, SellerListing, SellerOrder, PriceAlert
+        total_products = (await session.execute(select(func.count(SellerProduct.id)).where(SellerProduct.client_id == client_id))).scalar() or 0
+        total_listings = (await session.execute(select(func.count(SellerListing.id)).where(SellerListing.client_id == client_id))).scalar() or 0
+        total_orders = (await session.execute(select(func.count(SellerOrder.id)).where(SellerOrder.client_id == client_id))).scalar() or 0
+        pending_orders = (await session.execute(select(func.count(SellerOrder.id)).where(SellerOrder.client_id == client_id).where(SellerOrder.status == "pending"))).scalar() or 0
+        total_revenue = (await session.execute(select(func.coalesce(func.sum(SellerOrder.total), 0.0)).where(SellerOrder.client_id == client_id))).scalar() or 0.0
+        avg_seo = (await session.execute(select(func.coalesce(func.avg(SellerListing.seo_score), 0.0)).where(SellerListing.client_id == client_id))).scalar() or 0.0
+        alerts = (await session.execute(select(func.count(PriceAlert.id)).where(PriceAlert.client_id == client_id).where(PriceAlert.is_resolved == False))).scalar() or 0
+        return {
+            "total_products": total_products,
+            "total_listings": total_listings,
+            "total_orders": total_orders,
+            "pending_orders": pending_orders,
+            "total_revenue": round(total_revenue, 2),
+            "avg_seo_score": round(avg_seo, 2),
+            "price_alerts": alerts,
+        }
+
+
+@app.post("/api/seller/products")
+async def seller_create_product(request: Request, user: User = Depends(get_current_user)):
+    body = await request.json()
+    async for session in get_session():
+        cid = _get_my_client_id(user)
+        from db import SellerProduct
+        product = SellerProduct(client_id=cid, sku=body["sku"], name=body["name"], category=body.get("category"), cogs=float(body.get("cogs", 0) or 0))
+        session.add(product)
+        await session.commit()
+        await session.refresh(product)
+        return {"id": product.id, "sku": product.sku, "name": product.name}
+
+
+@app.get("/api/seller/products")
+async def seller_list_products(client_id: int = 1, user: User = Depends(get_current_user)):
+    async for session in get_session():
+        from sqlalchemy import select
+        from db import SellerProduct
+        result = await session.execute(select(SellerProduct).where(SellerProduct.client_id == client_id).order_by(SellerProduct.created_at.desc()))
+        return {"products": [{"id": p.id, "sku": p.sku, "name": p.name, "category": p.category, "cogs": p.cogs} for p in result.scalars().all()]}
+
+
+@app.post("/api/seller/listings")
+async def seller_create_listing(request: Request, user: User = Depends(get_current_user)):
+    body = await request.json()
+    async for session in get_session():
+        cid = _get_my_client_id(user)
+        from db import SellerListing
+        listing = SellerListing(client_id=cid, product_id=body["product_id"], platform=body["platform"], listing_id=body["listing_id"], title=body["title"], bullets=body.get("bullets"), description=body.get("description"), backend_keywords=body.get("backend_keywords"), price=float(body["price"]), stock=int(body.get("stock", 0) or 0))
+        session.add(listing)
+        await session.commit()
+        await session.refresh(listing)
+        return {"id": listing.id, "listing_id": listing.listing_id, "platform": listing.platform}
+
+
+@app.get("/api/seller/listings")
+async def seller_list_listings(client_id: int = 1, platform: str = "", user: User = Depends(get_current_user)):
+    async for session in get_session():
+        from sqlalchemy import select
+        from db import SellerListing
+        query = select(SellerListing).where(SellerListing.client_id == client_id)
+        if platform:
+            query = query.where(SellerListing.platform == platform)
+        result = await session.execute(query.order_by(SellerListing.updated_at.desc()))
+        return {"listings": [{"id": l.id, "platform": l.platform, "listing_id": l.listing_id, "title": l.title, "price": l.price, "stock": l.stock, "seo_score": l.seo_score} for l in result.scalars().all()]}
+
+
+@app.post("/api/seller/listings/{listing_id}/audit")
+async def seller_audit_listing(listing_id: int, user: User = Depends(get_current_user)):
+    async for session in get_session():
+        from sqlalchemy import select
+        from db import SellerListing, SeoAudit
+        result = await session.execute(select(SellerListing).where(SellerListing.id == listing_id))
+        listing = result.scalar_one_or_none()
+        if not listing:
+            raise HTTPException(status_code=404, detail="Listing not found")
+        audit = await do_audit_listing(listing)
+        db_audit = SeoAudit(client_id=listing.client_id, listing_id=listing.id, score=audit["score"], issues=audit["issues"], suggestions=audit["suggestions"], keywords_found=audit["keywords_found"], keywords_missing=audit["keywords_missing"])
+        session.add(db_audit)
+        listing.seo_score = audit["score"]
+        listing.seo_issues = audit["issues"]
+        listing.last_audited_at = datetime.now(timezone.utc)
+        await session.commit()
+        return audit
+
+
+@app.get("/api/seller/listings/{listing_id}/audits")
+async def seller_listing_audits(listing_id: int, user: User = Depends(get_current_user)):
+    async for session in get_session():
+        from sqlalchemy import select
+        from db import SeoAudit
+        result = await session.execute(select(SeoAudit).where(SeoAudit.listing_id == listing_id).order_by(SeoAudit.created_at.desc()))
+        return {"audits": [{"id": a.id, "score": a.score, "issues": a.issues, "suggestions": a.suggestions, "created_at": a.created_at.isoformat()} for a in result.scalars().all()]}
+
+
+@app.post("/api/seller/orders")
+async def seller_create_order(request: Request, user: User = Depends(get_current_user)):
+    body = await request.json()
+    async for session in get_session():
+        cid = _get_my_client_id(user)
+        from db import SellerOrder
+        order = SellerOrder(client_id=cid, product_id=body.get("product_id"), platform=body["platform"], order_id=body["order_id"], customer_name=body.get("customer_name"), customer_phone=body.get("customer_phone"), quantity=int(body.get("quantity", 1) or 1), unit_price=float(body["unit_price"]), tax=float(body.get("tax", 0) or 0), shipping=float(body.get("shipping", 0) or 0), total=float(body["total"]), status=body.get("status", "pending"), payment_status=body.get("payment_status", "pending"), fulfillment_status=body.get("fulfillment_status", "unfulfilled"), shipping_address=body.get("shipping_address"), tracking_id=body.get("tracking_id"), notes=body.get("notes"))
+        session.add(order)
+        await session.commit()
+        await session.refresh(order)
+        return {"id": order.id, "order_id": order.order_id, "status": order.status}
+
+
+@app.get("/api/seller/orders")
+async def seller_list_orders(client_id: int = 1, platform: str = "", status: str = "", limit: int = 100, user: User = Depends(get_current_user)):
+    async for session in get_session():
+        from sqlalchemy import select
+        from db import SellerOrder
+        query = select(SellerOrder).where(SellerOrder.client_id == client_id).order_by(SellerOrder.created_at.desc()).limit(limit)
+        if platform:
+            query = query.where(SellerOrder.platform == platform)
+        if status:
+            query = query.where(SellerOrder.status == status)
+        result = await session.execute(query)
+        return {"orders": [{"id": o.id, "order_id": o.order_id, "platform": o.platform, "customer_name": o.customer_name, "quantity": o.quantity, "total": o.total, "status": o.status, "created_at": o.created_at.isoformat()} for o in result.scalars().all()]}
+
+
+@app.put("/api/seller/orders/{order_id}")
+async def seller_update_order(order_id: str, request: Request, user: User = Depends(get_current_user)):
+    body = await request.json()
+    async for session in get_session():
+        from sqlalchemy import select
+        from db import SellerOrder
+        result = await session.execute(select(SellerOrder).where(SellerOrder.order_id == order_id))
+        order = result.scalar_one_or_none()
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+        for field in ["status", "payment_status", "fulfillment_status", "tracking_id", "notes"]:
+            if field in body:
+                setattr(order, field, body[field])
+        order.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        return {"status": "updated", "order_id": order.order_id}
+
+
+@app.post("/api/seller/orders/bulk-update")
+async def seller_bulk_update_orders(request: Request, user: User = Depends(get_current_user)):
+    body = await request.json()
+    order_ids = body.get("order_ids", [])
+    updates = body.get("updates", {})
+    async for session in get_session():
+        from sqlalchemy import select
+        from db import SellerOrder
+        result = await session.execute(select(SellerOrder).where(SellerOrder.order_id.in_(order_ids)))
+        orders = result.scalars().all()
+        for order in orders:
+            for field, value in updates.items():
+                if hasattr(order, field):
+                    setattr(order, field, value)
+            order.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        return {"updated": len(orders)}
+
+
+@app.get("/api/seller/prices/history")
+async def seller_price_history(product_id: int = None, platform: str = "", days: int = 30, client_id: int = 1, user: User = Depends(get_current_user)):
+    async for session in get_session():
+        from sqlalchemy import select
+        from db import PriceHistory
+        query = select(PriceHistory).where(PriceHistory.client_id == client_id)
+        if product_id:
+            query = query.where(PriceHistory.product_id == product_id)
+        if platform:
+            query = query.where(PriceHistory.platform == platform)
+        since = datetime.now(timezone.utc) - timedelta(days=days)
+        query = query.where(PriceHistory.recorded_at >= since).order_by(PriceHistory.recorded_at.desc())
+        result = await session.execute(query)
+        return {"history": [{"id": h.id, "product_id": h.product_id, "platform": h.platform, "my_price": h.my_price, "competitor_price": h.competitor_price, "delta": h.price_delta, "recorded_at": h.recorded_at.isoformat()} for h in result.scalars().all()]}
+
+
+@app.post("/api/seller/prices/compare/{product_id}")
+async def seller_compare_price(product_id: int, user: User = Depends(get_current_user)):
+    async for session in get_session():
+        cid = _get_my_client_id(user)
+        result = await do_compare_price(product_id, session, client_id=cid)
+        return result
+
+
+@app.get("/api/seller/alerts")
+async def seller_alerts(client_id: int = 1, resolved: bool = False, user: User = Depends(get_current_user)):
+    async for session in get_session():
+        from sqlalchemy import select
+        from db import PriceAlert
+        result = await session.execute(select(PriceAlert).where(PriceAlert.client_id == client_id).where(PriceAlert.is_resolved == resolved).order_by(PriceAlert.created_at.desc()))
+        return {"alerts": [{"id": a.id, "product_id": a.product_id, "platform": a.platform, "alert_type": a.alert_type, "message": a.message, "my_price": a.my_price, "competitor_price": a.competitor_price, "created_at": a.created_at.isoformat()} for a in result.scalars().all()]}
+
+
+@app.put("/api/seller/alerts/{alert_id}/resolve")
+async def seller_resolve_alert(alert_id: int, user: User = Depends(get_current_user)):
+    async for session in get_session():
+        from sqlalchemy import select
+        from db import PriceAlert
+        result = await session.execute(select(PriceAlert).where(PriceAlert.id == alert_id))
+        alert = result.scalar_one_or_none()
+        if not alert:
+            raise HTTPException(status_code=404, detail="Alert not found")
+        alert.is_resolved = True
+        await session.commit()
+        return {"status": "resolved", "alert_id": alert.id}
+
+
+@app.post("/api/seller/upload/products")
+async def seller_upload_products(file: UploadFile = File(...), user: User = Depends(get_current_user)):
+    import pandas as pd
+    async for session in get_session():
+        cid = _get_my_client_id(user)
+        contents = await file.read()
+        df = pd.read_csv(pd.io.common.BytesIO(contents))
+        result = await import_products_csv(df, session, client_id=cid)
+        return result
+
+
+@app.post("/api/seller/upload/listings")
+async def seller_upload_listings(file: UploadFile = File(...), user: User = Depends(get_current_user)):
+    import pandas as pd
+    async for session in get_session():
+        cid = _get_my_client_id(user)
+        contents = await file.read()
+        df = pd.read_csv(pd.io.common.BytesIO(contents))
+        result = await import_listings_csv(df, session, client_id=cid)
+        return result
+
+
+@app.post("/api/seller/upload/orders")
+async def seller_upload_orders(file: UploadFile = File(...), user: User = Depends(get_current_user)):
+    import pandas as pd
+    async for session in get_session():
+        cid = _get_my_client_id(user)
+        contents = await file.read()
+        df = pd.read_csv(pd.io.common.BytesIO(contents))
+        result = await import_orders_csv(df, session, client_id=cid)
+        return result
+
+
+@app.post("/api/seller/ai/seo-suggestions")
+async def seller_ai_seo_suggestions(request: Request, user: User = Depends(get_current_user)):
+    body = await request.json()
+    suggestion = await seller_llm.generate_seo_suggestions(body.get("title", ""), body.get("bullets", ""), body.get("description", ""), body.get("keywords", ""))
+    return {"suggestions": suggestion}
+
+
+@app.post("/api/seller/ai/price-insight")
+async def seller_ai_price_insight(request: Request, user: User = Depends(get_current_user)):
+    body = await request.json()
+    insight = await seller_llm.generate_price_insight(body.get("product_name", ""), float(body.get("my_price", 0) or 0), body.get("competitor_prices", []))
+    return {"insight": insight}
+
+
+@app.get("/api/seller/integrations/status")
+async def seller_integrations_status():
+    return {
+        "flipkart": {
+            "connected": bool(settings.flipkart_client_id and settings.flipkart_client_secret),
+            "api_url": settings.flipkart_api_url,
+        },
+        "amazon": {
+            "connected": bool(settings.amazon_client_id and settings.amazon_client_secret and settings.amazon_refresh_token),
+            "api_url": settings.amazon_sp_api_url,
+        },
+    }
+
+
+@app.post("/api/seller/integrations/flipkart/test")
+async def seller_test_flipkart():
+    client = FlipkartSellerClient()
+    return await client.test_connection()
+
+
+@app.post("/api/seller/integrations/amazon/test")
+async def seller_test_amazon():
+    client = AmazonSPClient()
+    return await client.test_connection()
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -2648,4 +3852,91 @@ async def anti_ban_status():
 async def anti_ban_toggle():
     """Toggle anti-ban layer on/off."""
     return {"enabled": True, "message": "Anti-ban layer is always ON for your protection"}
+
+
+# ---------------------------------------------------------------------------
+# Diagnostic & Reporting Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/diagnostic")
+async def diagnostic():
+    """One-click health check for all system components."""
+    import importlib
+    results = {}
+
+    # Database
+    try:
+        from db import engine
+        from sqlalchemy import text as sql_text
+        async with engine.connect() as conn:
+            await conn.execute(sql_text("SELECT 1"))
+        results["database"] = {"status": "ok"}
+    except Exception as e:
+        results["database"] = {"status": "error", "error": str(e)}
+
+    # LLM
+    try:
+        from llm_setup import get_provider_status
+        status = get_provider_status()
+        active = [k for k, v in status.items() if v.get("available")]
+        results["llm"] = {"status": "ok" if active else "error", "providers": status, "active": active}
+    except Exception as e:
+        results["llm"] = {"status": "error", "error": str(e)}
+
+    # Redis
+    try:
+        import redis
+        r = redis.Redis(host=os.getenv("REDIS_HOST", "localhost"), port=int(os.getenv("REDIS_PORT", "6379")), socket_timeout=2)
+        r.ping()
+        results["redis"] = {"status": "ok"}
+    except Exception as e:
+        results["redis"] = {"status": "error", "error": str(e)}
+
+    # ChromaDB
+    try:
+        from vector_store import get_collection_stats
+        stats = get_collection_stats(0)
+        results["chromadb"] = {"status": "ok" if stats.get("available") else "error", **stats}
+    except Exception as e:
+        results["chromadb"] = {"status": "error", "error": str(e)}
+
+    # WhatsApp Bridge
+    try:
+        import httpx
+        resp = httpx.get("http://127.0.0.1:3001/health", timeout=3)
+        data = resp.json()
+        results["whatsapp_bridge"] = {"status": "ok", "connection_state": data.get("connection_state"), "connected": data.get("connected")}
+    except Exception as e:
+        results["whatsapp_bridge"] = {"status": "error", "error": str(e)}
+
+    # Task Manager
+    try:
+        from task_manager import task_manager
+        results["task_manager"] = {"status": "ok", "registered_tasks": list(task_manager._tasks.keys())}
+    except Exception as e:
+        results["task_manager"] = {"status": "error", "error": str(e)}
+
+    return results
+
+
+@app.get("/api/reports/{client_id}")
+async def get_monthly_report(client_id: int, month: str = ""):
+    """Generate a monthly CRM report with CA insights."""
+    try:
+        from reporting import report_generator
+        report = await report_generator.generate_monthly_report(client_id, month or None)
+        return report
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Report generation failed: {e}")
+
+
+@app.get("/api/reports/{client_id}/summary")
+async def get_crm_summary(client_id: int):
+    """Get a quick CRM summary for the dashboard."""
+    try:
+        from reporting import report_generator
+        stats = await report_generator._query_stats(client_id)
+        return {"client_id": client_id, "stats": stats}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Summary generation failed: {e}")
 

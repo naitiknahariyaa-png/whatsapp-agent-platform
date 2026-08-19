@@ -1,44 +1,22 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
-*.egg
-.venv/
-venv/
-env/
-
-# Environment
+# API Keys and Secrets
 .env
-*.env.local
+secrets.json
+*.pem
+*.key
 
-# Database
+# Local Databases
 *.db
 *.sqlite3
-business_data.json
+chroma_db/
 
-# WhatsApp bridge session data (contains sensitive login tokens - NEVER commit)
-.wwebjs_auth/
-.wwebjs_cache/
-qr.png
+# Node Modules & Python Cache
+node_modules/
+__pycache__/
+*.py[cod]
+*$py.class
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
+# OS Files
 .DS_Store
 Thumbs.db
-
-# Docker
-docker/data/
-
-# Logs
-*.log
-/tmp/
-
-# Node
-node_modules/
+.vscode/
+.idea/

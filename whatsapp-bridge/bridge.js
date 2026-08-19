@@ -8,13 +8,13 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const axios = require('axios');
 
 // ── Configuration ────────────────────────────────────────────────────────────
 const HTTP_PORT = parseInt(process.env.HTTP_PORT || '3001', 10);
-const AGENT_API_URL = process.env.AGENT_API_URL || 'http://localhost:8000';
+const AGENT_API_URL = process.env.AGENT_API_URL || 'http://127.0.0.1:8000';
 const WA_BRIDGE_SECRET = process.env.WA_BRIDGE_SECRET || 'wap_bridge_secret_2026';
 
 // ── State ───────────────────────────────────────────────────────────────────
@@ -69,6 +69,7 @@ function createClient() {
       '--no-default-browser-check', '--disable-features=TranslateUI',
       '--disable-features=OptimizationHints', '--disable-features=MediaRouter',
       '--disable-features=DialMediaRouteProvider',
+      '--disable-infobars', '--disable-notifications', '--window-size=1280,1024',
     ],
   };
   if (chromePath) puppeteerOptions.executablePath = chromePath;
@@ -91,7 +92,19 @@ function initClient() {
     console.log('📱 QR code generated. Scan with WhatsApp -> Linked Devices.');
   });
   client.on('authenticated', () => { connectionState = 'authenticated'; console.log('✅ Authenticated with WhatsApp.'); });
-  client.on('auth_failure', (msg) => { connectionState = 'failed'; isConnected = false; console.error('❌ Auth failure:', msg); });
+  client.on('auth_failure', async (msg) => {
+    connectionState = 'failed';
+    isConnected = false;
+    console.error('❌ Auth failure:', msg);
+    try {
+      await client.destroy();
+    } catch (e) {}
+    client = null;
+    setTimeout(() => {
+      console.log('[!] Auth failure detected - reinitializing WhatsApp client');
+      initClient();
+    }, 5000);
+  });
   client.on('ready', async () => {
     isConnected = true;
     connectionState = 'connected';
@@ -104,12 +117,29 @@ function initClient() {
     if (msg.fromMe) return;
     try {
       const contact = await msg.getContact();
+      
+      let mediaData = null;
+      let mediaMimetype = null;
+      if (msg.hasMedia) {
+        try {
+          const media = await msg.downloadMedia();
+          if (media) {
+            mediaData = media.data;
+            mediaMimetype = media.mimetype;
+          }
+        } catch (err) {
+          console.error('Failed to download media:', err.message);
+        }
+      }
+
       const result = await forwardToAgent('message', {
         from: msg.from,
         from_name: contact ? contact.pushname || contact.name || '' : '',
         body: msg.body,
         timestamp: msg.timestamp,
         hasMedia: msg.hasMedia,
+        mediaData: mediaData,
+        mediaMimetype: mediaMimetype,
       });
       if (result && result.reply) {
         const chatId = msg.from.includes('@') ? msg.from : msg.from + '@c.us';
@@ -117,13 +147,23 @@ function initClient() {
       }
     } catch (e) { console.error('Message error:', e.message); }
   });
-  client.on('disconnected', (reason) => {
+  client.on('disconnected', async (reason) => {
     isConnected = false;
     connectionState = 'disconnected';
     currentQR = null;
     currentQRDataUrl = null;
     console.log('❌ Disconnected:', reason);
     forwardToAgent('disconnected', { reason });
+    try {
+      await client.destroy();
+    } catch (e) {}
+    client = null;
+    setTimeout(() => {
+      if (!isConnected) {
+        console.log('[!] Reinitializing WhatsApp client after disconnect');
+        initClient();
+      }
+    }, 5000);
   });
   client.initialize().catch((err) => {
     console.error('❌ Init failed:', err.message);
@@ -216,7 +256,21 @@ app.post('/send', async (req, res) => {
     if (!isConnected || !client) return res.status(503).json({ error: 'WhatsApp not connected' });
     const chatId = to.includes('@') ? to : to + '@c.us';
     const sent = await client.sendMessage(chatId, message);
-    return res.json({ status: 'sent', id: sent.id._serialized });
+    const msgId = sent && sent.id ? (sent.id._serialized || sent.id.toString ? sent.id.toString() : String(sent.id)) : null;
+    return res.json({ status: 'sent', id: msgId });
+  } catch (e) { return res.status(500).json({ error: e.message }); }
+});
+
+app.post('/send-image', async (req, res) => {
+  try {
+    const { to, image_url, caption } = req.body || {};
+    if (!to || !image_url) return res.status(400).json({ error: 'to and image_url are required' });
+    if (!canSendMessage()) return res.status(429).json({ error: 'Rate limit exceeded. Try again in a few seconds.' });
+    if (!isConnected || !client) return res.status(503).json({ error: 'WhatsApp not connected' });
+    const chatId = to.includes('@') ? to : to + '@c.us';
+    const media = await MessageMedia.fromUrl(image_url, { timeout: 30000 });
+    const sent = await client.sendMessage(chatId, media, caption ? { caption } : {});
+    return res.json({ status: 'sent', id: sent && sent.id ? String(sent.id) : null });
   } catch (e) { return res.status(500).json({ error: e.message }); }
 });
 

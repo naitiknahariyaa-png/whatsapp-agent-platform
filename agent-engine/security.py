@@ -14,22 +14,33 @@ from typing import Deque, Dict, Tuple
 from fastapi import HTTPException, Request, status
 
 
+from config import settings
+
 # ---------------------------------------------------------------------------
 # Webhook signature verification
 # ---------------------------------------------------------------------------
 
-WA_BRIDGE_SECRET = os.getenv("WA_BRIDGE_SECRET", "")  # shared HMAC secret with bridge.js
-
 
 def verify_bridge_webhook(body: bytes, signature: str | None) -> bool:
     """Verify X-Bridge-Signature HMAC-SHA256 from whatsapp-bridge/bridge.js."""
-    if not WA_BRIDGE_SECRET:
-        # If no secret configured, accept (dev mode). In production set WA_BRIDGE_SECRET.
+    secret = settings.wa_bridge_secret or os.getenv("WA_BRIDGE_SECRET", "")
+    if not secret:
         return True
     if not signature:
         return False
-    expected = hmac.new(WA_BRIDGE_SECRET.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
+    sig = signature.removeprefix("sha256=")
+    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, sig)
+
+
+def verify_bridge_webhook_with_timestamp(body: bytes, signature: str | None, timestamp: int | None) -> bool:
+    """Verify HMAC signature AND timestamp within 5-minute window (replay attack prevention)."""
+    if timestamp is None:
+        return False
+    now = int(time.time())
+    if abs(now - timestamp) > 300:
+        return False
+    return verify_bridge_webhook(body, signature)
 
 
 def verify_meta_webhook(mode: str | None, token: str | None, verify_token: str | None,

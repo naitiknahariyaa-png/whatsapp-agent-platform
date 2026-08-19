@@ -139,6 +139,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     <div class="nav-item" onclick="showSection('profile')" id="nav-profile"><span class="nav-icon">🏪</span><span>Business Profile</span></div>
     <div class="nav-item" onclick="showSection('catalog')" id="nav-catalog"><span class="nav-icon">📦</span><span>Catalog</span></div>
     <div class="nav-item" onclick="showSection('orders')" id="nav-orders"><span class="nav-icon">📋</span><span>Orders</span></div>
+    <div class="nav-group">Seller CRM</div>
+    <div class="nav-item" onclick="showSection('seller')" id="nav-seller"><span class="nav-icon">🛒</span><span>Seller Dashboard</span></div>
+    <div class="nav-item" onclick="showSection('seller-products')" id="nav-seller-products"><span class="nav-icon">📦</span><span>Products</span></div>
+    <div class="nav-item" onclick="showSection('seller-listings')" id="nav-seller-listings"><span class="nav-icon">📝</span><span>Listings</span></div>
+    <div class="nav-item" onclick="showSection('seller-orders')" id="nav-seller-orders"><span class="nav-icon">📋</span><span>Orders</span></div>
+    <div class="nav-item" onclick="showSection('seller-prices')" id="nav-seller-prices"><span class="nav-icon">💰</span><span>Prices</span></div>
     <div class="nav-group">Growth</div>
     <div class="nav-item" onclick="showSection('analytics')" id="nav-analytics"><span class="nav-icon">📈</span><span>Analytics</span></div>
     <div class="nav-item" onclick="showSection('crm')" id="nav-crm"><span class="nav-icon">👥</span><span>CRM</span></div>
@@ -295,6 +301,78 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
   </div>
 </div>
 
+<!-- Seller CRM -->
+<div class="section" id="section-seller">
+  <div class="page-header"><h1>🛒 Seller CRM Dashboard</h1><p>Amazon & Flipkart — Products, Listings, Orders, Prices</p></div>
+  <div class="stats-grid">
+    <div class="stat-card"><div class="stat-icon">📦</div><div class="stat-value" id="s-products">-</div><div class="stat-label">Products</div></div>
+    <div class="stat-card"><div class="stat-icon">📝</div><div class="stat-value" id="s-listings">-</div><div class="stat-label">Listings</div></div>
+    <div class="stat-card"><div class="stat-icon">📋</div><div class="stat-value" id="s-orders">-</div><div class="stat-label">Orders</div></div>
+    <div class="stat-card"><div class="stat-icon">⏳</div><div class="stat-value" id="s-pending">-</div><div class="stat-label">Pending</div></div>
+    <div class="stat-card"><div class="stat-icon">💰</div><div class="stat-value" id="s-revenue">-</div><div class="stat-label">Revenue</div></div>
+    <div class="stat-card"><div class="stat-icon">📊</div><div class="stat-value" id="s-seo">-</div><div class="stat-label">Avg SEO</div></div>
+    <div class="stat-card"><div class="stat-icon">🔔</div><div class="stat-value" id="s-alerts">-</div><div class="stat-label">Alerts</div></div>
+  </div>
+  <div class="card">
+    <div class="card-title">Quick Actions</div>
+    <button class="btn" onclick="showSection('seller-products')">Manage Products</button>
+    <button class="btn" onclick="showSection('seller-listings')">Audit Listings</button>
+    <button class="btn" onclick="showSection('seller-orders')">View Orders</button>
+    <button class="btn" onclick="showSection('seller-prices')">Price Monitor</button>
+  </div>
+</div>
+
+<div class="section" id="section-seller-products">
+  <div class="page-header"><h1>📦 Seller Products</h1><p>Manage your product catalog</p></div>
+  <div class="card">
+    <button class="btn" onclick="showAddSellerProduct()">+ Add Product</button>
+    <div id="seller-product-form" style="display:none;margin-top:12px;">
+      <input id="sp-sku" placeholder="SKU *" style="width:100%;padding:10px;margin-bottom:8px;border:1px solid var(--border);border-radius:8px;">
+      <input id="sp-name" placeholder="Product Name *" style="width:100%;padding:10px;margin-bottom:8px;border:1px solid var(--border);border-radius:8px;">
+      <input id="sp-category" placeholder="Category" style="width:100%;padding:10px;margin-bottom:8px;border:1px solid var(--border);border-radius:8px;">
+      <input id="sp-cogs" placeholder="COGS" type="number" step="0.01" style="width:100%;padding:10px;margin-bottom:8px;border:1px solid var(--border);border-radius:8px;">
+      <button class="btn" onclick="addSellerProduct()">Save</button>
+      <button class="btn btn-secondary" onclick="document.getElementById('seller-product-form').style.display='none'">Cancel</button>
+    </div>
+    <table class="table" id="seller-products-table"><thead><tr><th>SKU</th><th>Name</th><th>Category</th><th>COGS</th></tr></thead><tbody><tr><td colspan="4" style="text-align:center;color:var(--text-light)">Loading...</td></tr></tbody></table>
+  </div>
+</div>
+
+<div class="section" id="section-seller-listings">
+  <div class="page-header"><h1>📝 Seller Listings</h1><p>SEO audit and listing management</p></div>
+  <div class="card">
+    <select id="sl-platform" onchange="loadSellerListings()" style="padding:8px;border-radius:8px;border:1px solid var(--border);margin-bottom:12px;">
+      <option value="">All Platforms</option><option value="amazon">Amazon</option><option value="flipkart">Flipkart</option>
+    </select>
+    <table class="table" id="seller-listings-table"><thead><tr><th>Platform</th><th>Listing ID</th><th>Title</th><th>Price</th><th>Stock</th><th>SEO</th><th>Action</th></tr></thead><tbody><tr><td colspan="7" style="text-align:center;color:var(--text-light)">Loading...</td></tr></tbody></table>
+  </div>
+</div>
+
+<div class="section" id="section-seller-orders">
+  <div class="page-header"><h1>📋 Seller Orders</h1><p>Unified order management</p></div>
+  <div class="card">
+    <select id="so-platform" onchange="loadSellerOrders()" style="padding:8px;border-radius:8px;border:1px solid var(--border);margin-bottom:12px;">
+      <option value="">All Platforms</option><option value="amazon">Amazon</option><option value="flipkart">Flipkart</option>
+    </select>
+    <select id="so-status" onchange="loadSellerOrders()" style="padding:8px;border-radius:8px;border:1px solid var(--border);margin-bottom:12px;">
+      <option value="">All Status</option><option value="pending">Pending</option><option value="confirmed">Confirmed</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option>
+    </select>
+    <table class="table" id="seller-orders-table"><thead><tr><th>Order ID</th><th>Platform</th><th>Customer</th><th>Qty</th><th>Total</th><th>Status</th><th>Date</th></tr></thead><tbody><tr><td colspan="7" style="text-align:center;color:var(--text-light)">Loading...</td></tr></tbody></table>
+  </div>
+</div>
+
+<div class="section" id="section-seller-prices">
+  <div class="page-header"><h1>💰 Price Monitor</h1><p>Competitor tracking and alerts</p></div>
+  <div class="card">
+    <h3>Active Alerts</h3>
+    <div id="seller-alerts"><p style="color:var(--text-light)">Loading...</p></div>
+  </div>
+  <div class="card">
+    <h3>Price History (30 Days)</h3>
+    <div id="seller-price-history"><p style="color:var(--text-light)">Loading...</p></div>
+  </div>
+</div>
+
 <!-- WhatsApp Admin -->
 <div class="section" id="section-whatsapp">
   <div class="page-header"><h1>📱 WhatsApp Bridge Admin</h1><p>Start/stop bridge, QR, Meta test-sends</p></div>
@@ -303,10 +381,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
       <button id="start">Start Bridge</button>
       <button id="stop">Stop Bridge</button>
       <button id="refresh">Refresh QR</button>
-      <button id="statusBtn">Get Status</button>
-    </div>
-
-    <div style="margin-top:12px;margin-bottom:12px">
+    <button id="reset">Reset Session</button>
       <strong>Admin Login (for sending):</strong>
       <input id="loginEmail" placeholder="email" style="margin-left:8px" />
       <input id="loginPassword" placeholder="password" type="password" style="margin-left:8px" />
@@ -355,7 +430,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
     <h3>Bridge Health</h3>
     <div id="health" class="status small">Loading...</div>
   </div>
-  <script src="/js/whatsapp_admin.js"></script>
+  <script src="/frontend/js/whatsapp_admin.js"></script>
 </div>
 
 <!-- CRM -->
@@ -799,9 +874,18 @@ POST /api/webhooks</div>
 <div class="section" id="section-templates">
   <div class="page-header"><h1>💬 Message Templates</h1><p>Customize what messages customers receive</p></div>
   <div class="card">
-    <div class="card-title">📝 Welcome Message</div>
-    <div class="form-group"><label>First message customers see when they chat</label><textarea id="tplWelcome" rows="3" style="font-family:monospace;font-size:13px"></textarea></div>
+  <div class="card-title">📝 Welcome Message</div>
+    <div class="form-group"><textarea id="tplWelcome" rows="3" style="font-family:monospace;font-size:13px"></textarea></div>
     <p style="font-size:12px;color:var(--text-light)">Variables: {business_name}, {customer_name}</p>
+  </div>
+  <div class="card">
+    <div class="card-title">📋 Profession Template Library</div>
+    <p style="font-size:13px;color:var(--text-light);margin-bottom:12px">Browse pre-built message templates for your business type — appointment confirmations, reminders, invoices, follow-ups, and more.</p>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <a href="templates.html" class="btn btn-sm">📄 Open Template Browser</a>
+      <button class="btn btn-secondary btn-sm" onclick="loadProfessionTemplates()">🔄 Reload Profession Templates</button>
+    </div>
+    <div id="professionTemplates" style="margin-top:16px"></div>
   </div>
   <button class="btn" onclick="saveTemplates()">💾 Save Templates</button>
 </div>
@@ -959,7 +1043,7 @@ function showSection(name) {
   if (name === 'dashboard') loadDashboard();
   if (name === 'catalog') loadCatalog();
   if (name === 'orders') loadOrders();
-  if (name === 'templates') loadTemplates();
+   if (name === 'templates') { loadTemplates(); loadProfessionTemplates(); }
   if (name === 'theme') loadThemesList();
   if (name === 'analytics') loadAnalytics();
   if (name === 'storefront') updateStorefrontUrl();
@@ -979,6 +1063,11 @@ function showSection(name) {
   if (name === 'prompt') loadPrompts();
   if (name === 'webhooks') loadWebhooks();
   if (name === 'plugin') loadPlugins();
+  if (name === 'seller') loadSellerDashboard();
+  if (name === 'seller-products') loadSellerProducts();
+  if (name === 'seller-listings') loadSellerListings();
+  if (name === 'seller-orders') loadSellerOrders();
+  if (name === 'seller-prices') loadSellerPrices();
   closeSidebar();
 }
 
@@ -1180,6 +1269,36 @@ function loadTemplates() {
     apiFetch(`/api/business/${currentBusinessId}`).then(p => {
       document.getElementById('tplWelcome').value = p.welcome_message || '';
     }).catch(() => {});
+  }
+}
+
+async function loadProfessionTemplates() {
+  const container = document.getElementById('professionTemplates');
+  if (!container) return;
+  let bizType = '';
+  try {
+    const profile = await apiFetch(`/api/business/${currentBusinessId}`);
+    bizType = profile.business_type || '';
+  } catch(e) {}
+  if (!bizType) {
+    container.innerHTML = '<p style="font-size:12px;color:var(--warning)">Set your business type in Business Profile to see pre-built templates.</p>';
+    return;
+  }
+  try {
+    const data = await apiFetch(`/api/templates/profession/${bizType}`);
+    const tmpls = data.templates || [];
+    if (!tmpls.length) {
+      container.innerHTML = '<p style="font-size:12px;color:var(--text-light)">No templates for this business type.</p>';
+      return;
+    }
+    container.innerHTML = tmpls.map(t =>
+      `<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;background:var(--surface2)">
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px">${t.title} <span class="badge badge-wip" style="font-size:10px">${t.category}</span></div>
+        <div style="font-size:11px;color:var(--text-light);font-family:monospace;white-space:pre-wrap;max-height:80px;overflow:hidden">${t.content}</div>
+      </div>`
+    ).join('');
+  } catch(e) {
+    container.innerHTML = '<p style="font-size:12px;color:var(--danger)">Failed to load templates</p>';
   }
 }
 
@@ -1864,6 +1983,67 @@ function sendChat() {
 }
 
 init();
+
+// Seller CRM functions
+async function loadSellerDashboard() {
+  try {
+    const d = await apiFetch('/seller/dashboard');
+    document.getElementById('s-products').textContent = d.total_products || 0;
+    document.getElementById('s-listings').textContent = d.total_listings || 0;
+    document.getElementById('s-orders').textContent = d.total_orders || 0;
+    document.getElementById('s-pending').textContent = d.pending_orders || 0;
+    document.getElementById('s-revenue').textContent = '₹' + (d.total_revenue || 0).toLocaleString();
+    document.getElementById('s-seo').textContent = (d.avg_seo_score || 0) + '%';
+    document.getElementById('s-alerts').textContent = d.price_alerts || 0;
+  } catch(e) { console.error(e); }
+}
+
+async function loadSellerProducts() {
+  const data = await apiFetch('/seller/products');
+  const tbody = document.querySelector('#seller-products-table tbody');
+  if (!data.products.length) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-light)">No products yet</td></tr>'; return; }
+  tbody.innerHTML = data.products.map(p => '<tr><td>'+p.sku+'</td><td>'+p.name+'</td><td>'+(p.category||'-')+'</td><td>₹'+p.cogs.toFixed(2)+'</td></tr>').join('');
+}
+
+function showAddSellerProduct() { document.getElementById('seller-product-form').style.display='block'; }
+async function addSellerProduct() {
+  const body = { sku: document.getElementById('sp-sku').value, name: document.getElementById('sp-name').value, category: document.getElementById('sp-category').value, cogs: parseFloat(document.getElementById('sp-cogs').value)||0 };
+  await apiFetch('/seller/products', {method:'POST', body:JSON.stringify(body)});
+  document.getElementById('seller-product-form').style.display='none';
+  loadSellerProducts();
+}
+
+async function loadSellerListings() {
+  const platform = document.getElementById('sl-platform').value;
+  const data = await apiFetch('/seller/listings?platform='+platform);
+  const tbody = document.querySelector('#seller-listings-table tbody');
+  if (!data.listings.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-light)">No listings yet</td></tr>'; return; }
+  tbody.innerHTML = data.listings.map(l => '<tr><td><span class="badge badge-'+l.platform+'">'+l.platform+'</span></td><td>'+l.listing_id+'</td><td>'+l.title+'</td><td>₹'+l.price.toFixed(2)+'</td><td>'+l.stock+'</td><td>'+l.seo_score.toFixed(1)+'</td><td><button class="btn btn-sm" onclick="auditSellerListing('+l.id+')">Audit</button></td></tr>').join('');
+}
+
+async function auditSellerListing(id) {
+  const res = await apiFetch('/seller/listings/'+id+'/audit', {method:'POST'});
+  alert('SEO Score: '+res.score+'/100\nIssues: '+res.issues.join(', '));
+  loadSellerListings();
+}
+
+async function loadSellerOrders() {
+  const platform = document.getElementById('so-platform').value;
+  const status = document.getElementById('so-status').value;
+  const data = await apiFetch('/seller/orders?platform='+platform+'&status='+status);
+  const tbody = document.querySelector('#seller-orders-table tbody');
+  if (!data.orders.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-light)">No orders yet</td></tr>'; return; }
+  tbody.innerHTML = data.orders.map(o => '<tr><td>'+o.order_id+'</td><td><span class="badge badge-'+o.platform+'">'+o.platform+'</span></td><td>'+(o.customer_name||'-')+'</td><td>'+o.quantity+'</td><td>₹'+o.total.toFixed(2)+'</td><td>'+o.status+'</td><td>'+new Date(o.created_at).toLocaleDateString()+'</td></tr>').join('');
+}
+
+async function loadSellerPrices() {
+  const hist = await apiFetch('/seller/prices/history?days=30');
+  document.getElementById('seller-price-history').innerHTML = hist.history.slice(0,20).map(h => '<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:14px;"><span>Product #'+h.product_id+' ('+h.platform+')</span><span>₹'+h.my_price+' vs ₹'+h.competitor_price+' <span style="color:'+(h.delta>0?'green':'red')+'">'+(h.delta>0?'+':'')+h.delta+'</span></span></div>').join('');
+  const alerts = await apiFetch('/seller/alerts?resolved=false');
+  document.getElementById('seller-alerts').innerHTML = alerts.alerts.length ? alerts.alerts.map(a => '<div style="padding:12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;"><strong>'+a.alert_type+'</strong> — '+a.message+'<br><small>₹'+a.my_price+' vs ₹'+a.competitor_price+'</small><br><button class="btn btn-sm" onclick="resolveSellerAlert('+a.id+')">Resolve</button></div>').join('') : '<p>No active alerts</p>';
+}
+
+async function resolveSellerAlert(id) { await apiFetch('/seller/alerts/'+id+'/resolve', {method:'PUT'}); loadSellerPrices(); }
 </script>
 </body>
 </html>

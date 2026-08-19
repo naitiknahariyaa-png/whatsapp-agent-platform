@@ -90,7 +90,7 @@ class BroadcastEngine:
 
     # -- Campaign -----------------------------------------------------------
 
-    async def send_campaign(self, list_name: str, message_template: str) -> dict:
+    async def send_campaign(self, list_name: str, message_template: str, client_id: int = 1) -> dict:
         """Create a campaign and start sending in the background."""
         bl = await self.get_list(list_name)
         if not bl:
@@ -114,7 +114,7 @@ class BroadcastEngine:
             campaign_id = campaign.id
 
         # Fire-and-forget background task
-        task = asyncio.create_task(self._run_campaign(campaign_id, phones, message_template))
+        task = asyncio.create_task(self._run_campaign(campaign_id, phones, message_template, client_id=client_id))
         self._running_tasks[campaign_id] = task
         return {"campaign_id": campaign_id, "total": len(phones), "status": "started"}
 
@@ -134,7 +134,7 @@ class BroadcastEngine:
 
     # -- Internal worker ----------------------------------------------------
 
-    async def _run_campaign(self, campaign_id: int, phones: List[str], template: str):
+    async def _run_campaign(self, campaign_id: int, phones: List[str], template: str, client_id: int = 1):
         """Send messages one-by-one with rate-limiting and personalization."""
         results = []
         sent = 0
@@ -147,7 +147,7 @@ class BroadcastEngine:
             for phone in phones:
                 try:
                     # Personalize message with customer data
-                    personalized = await self._personalize_message(phone, template)
+                    personalized = await self._personalize_message(phone, template, client_id=client_id)
                     
                     resp = await client.post(f"{self.bridge_url}/send", json={
                         "to": phone, "message": personalized
@@ -175,17 +175,17 @@ class BroadcastEngine:
         )
         self._running_tasks.pop(campaign_id, None)
 
-    async def _personalize_message(self, phone: str, template: str) -> str:
+    async def _personalize_message(self, phone: str, template: str, client_id: int = 1) -> str:
         """Personalize message with customer name and order history"""
         from db import upsert_contact, get_conversation_history
         
         async with async_session() as session:
             # Get contact
-            contact = await upsert_contact(session, phone_number=phone)
+            contact = await upsert_contact(session, phone_number=phone, client_id=client_id)
             name = contact.name or "Customer"
             
             # Get recent order/appointment count
-            history = await get_conversation_history(session, phone, limit=20)
+            history = await get_conversation_history(session, phone, limit=20, client_id=client_id)
             order_count = sum(1 for h in history if h.direction == "outgoing" and "order" in h.content.lower())
             
             # Personalize template
