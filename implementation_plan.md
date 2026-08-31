@@ -1,80 +1,115 @@
-# WhatsApp Agent Platform Full Automation Plan
+# Project Completion Goal
 
-This document details every problem in the current setup and provides a step-by-step guide to fix them, ensuring the WhatsApp Agent Platform runs smoothly with full automation, functioning memory, working WhatsApp connection, and reliable LLM responses.
-
-## User Review Required
-> [!IMPORTANT]
-> Please review this plan. Once approved, I will execute these steps to fix the project. Let me know if you want to focus on local deployment (terminal) or cloud deployment (Render/VPS).
-
-## Open Questions
-- Do you have a `GROQ_API_KEY` ready to use, or do you prefer setting up a local `Ollama` model?
-- Do you want to run this purely in the terminal (as the `README` implies) or do you want the web dashboard to be fixed and connected?
+**Objective**: Deliver a fully‑functional local development platform that exposes all business‑logic via a FastAPI server, provides a lightweight UI (served on `http://localhost:8000`), includes a command‑line interface for ops, and ships with Docker support for easy startup.
 
 ---
 
-## 1. Problem: WhatsApp Linked Method is Not Working
+## 1. Missing API Endpoints (FastAPI routers)
 
-### Why it failed:
-The system has two conflicting ways to connect:
-1. **Frontend Dashboard:** Generates a "Click-to-Chat" link (`wa.me`) instead of a real QR code to link your device. 
-2. **Backend Bridge (`bridge.js`):** This is the actual bridge that uses `whatsapp-web.js`, but it lacks the correct webhook signature (`X-Bridge-Signature`). The Python backend rejects messages because the signature is missing.
-
-### How to fix it (Automation Fix):
-- **Bypass Frontend:** We will rely entirely on the terminal UI (`wap-cli.py`) or headless backend to start the bridge.
-- **Fix Webhook Signature:** Modify `agent-engine/main.py` to bypass the strict signature check for local connections, OR update `whatsapp-bridge/bridge.js` to correctly sign the webhook payload.
-- **Persistent Session:** Ensure the `.wwebjs_auth` folder is properly persisted so you don't have to scan the QR code every time the server restarts.
-
-## 2. Problem: LLM Responses are Mocked/Failing
-
-### Why it failed:
-If the `GROQ_API_KEY` is missing or invalid in the `.env` file, the system automatically falls back to a `MockLLM` which just replies with hardcoded keyword responses.
-
-### How to fix it (Automation Fix):
-- **Environment Setup:** Explicitly define `LLM_PROVIDER=groq` and insert a valid `GROQ_API_KEY` in `agent-engine/.env`.
-- **Disable Mock Fallback:** We will modify `agent-engine/llm_setup.py` to strictly enforce the real LLM and throw a clear error if the API key is missing, rather than silently failing to a mock response.
-
-## 3. Problem: Memory & CRM is Not Working
-
-### Why it failed:
-1. **Short-term Memory:** The state machine defaults to an in-memory dictionary that wipes clean every time you restart the script because Redis is not configured.
-2. **Long-term Memory (Vector Store):** The system tries to use ChromaDB for knowledge, but ChromaDB isn't even in the `requirements.txt` file and isn't installed.
-3. **Database Initialization:** The SQLite database tables sometimes fail to initialize properly on the first run.
-
-### How to fix it (Automation Fix):
-- **Fix SQLite Database:** Add an explicit database initialization script to guarantee tables are created before the app starts.
-- **Install ChromaDB:** Add `chromadb` to `agent-engine/requirements.txt` and wire up `agent-engine/vector_store.py` properly.
-- **State Persistence:** Ensure the fallback memory writes state to SQLite instead of volatile RAM if Redis is unavailable.
+| Router file | Endpoints to add | Why needed |
+|---|---|---|
+| `onboarding.py` | `GET /owners/{owner_id}/state` (lightweight wizard state) | UI can load owner basics without pulling the whole catalog. |
+| `alerts.py` | `GET /alerts` – list current alerts<br>`POST /alerts/trigger` – manual trigger for a named check | Allows UI & CLI to display health info and test alerts. |
+| `weekly_report.py` | `POST /weekly_report/generate` – returns generated report JSON | UI button to view last week’s metrics; CLI command to dump report. |
+| `reengagement_loop.py` | `POST /reengagement/run` – run once now<br>`POST /reengagement/stop` – cancel pending nudges for a lead ID | Enables manual control and UI monitoring. |
+| `approval_gates.py` | `POST /approval/request` – create request (persisted) <br>`POST /approval/decision` – approve/reject <br>`GET /approval/pending` – list pending requests | Human‑in‑the‑loop workflow must be reachable via HTTP. |
+| **Transaction safety** | Wrap catalog inserts (`add_catalog_item`, `add_catalog_items_bulk`) in `async with db.begin():` | Guarantees atomicity for bulk ops. |
+| **Idempotent booking** | In `chat_assistant.py`, before `create_booking` check for existing booking with same `conversation_id` (unique constraint) | Prevent duplicate rows on retries. |
+| **Error handling** | Return proper HTTP 4xx/5xx when `business_manager.load_profile` fails; surface message to user. |
+| **LLM token truncation** | Add a helper that trims the chat history to a token budget (e.g., 3 k tokens) before sending to LLM. |
 
 ---
 
-## Proposed Changes Step-by-Step
+## 2. Persistence for Approval Requests
 
-### 1. Fix the WhatsApp Bridge & Webhooks
-#### [MODIFY] `whatsapp-bridge/bridge.js`
-- Add code to inject `X-Bridge-Signature` into the POST requests sent to the Python backend so they are accepted.
-- Hardcode the backend URL to `http://127.0.0.1:8000/webhook` for local stability.
+* Add a new SQLAlchemy model `approval_requests` (mirroring `ApprovalRequest` fields).
+* Add migrations (Alembic) – for now just create the table via `Base.metadata.create_all()` on startup (acceptable for dev). 
+* Update `ApprovalEngine` to store/retrieve from DB instead of the in‑memory dict.
 
-#### [MODIFY] `agent-engine/main.py`
-- Relax or fix the `verify_bridge_webhook` logic so it accepts messages from our local Node.js bridge without failing silently.
+---
 
-### 2. Fix LLM & Memory Dependencies
-#### [MODIFY] `agent-engine/requirements.txt`
-- Add `chromadb` for long-term vector memory.
-- Add `redis` for robust state management.
+## 3. Background Scheduler (APScheduler)
 
-#### [MODIFY] `agent-engine/llm_setup.py`
-- Force the system to log a glaring error if it reverts to `MockLLM`, making it obvious why AI isn't working.
+* Install `apscheduler` (already in `requirements.txt`? If not, add it – but try to use stdlib `sched` if we want zero extra deps; however APScheduler is lightweight and already common). 
+* In `main.py` (FastAPI entry point) start a `BackgroundScheduler` that:
+  * Runs `WeeklyReportGenerator().generate()` every Monday 02:00.
+  * Runs `ReengagementLoop().process()` every 6 hours.
+* Provide a graceful shutdown hook to shut down the scheduler.
 
-### 3. Automate the Startup (Zero-Touch)
-#### [NEW] `start-all.bat` (Windows)
-- Create a single script that:
-  1. Activates the virtual environment.
-  2. Starts the FastAPI backend in the background.
-  3. Starts the Node.js WhatsApp bridge in a separate window.
-  4. Launches `wap-cli.py` to give you terminal control.
+---
 
-## Verification Plan
+## 4. CLI Scaffold (`cli.py`)
 
-1. **Database:** Verify `wap_data.db` is created and contains all tables.
-2. **LLM Check:** Run `python -c "from agent-engine.llm_setup import get_llm; print(get_llm())"` to confirm Groq is loaded, not MockLLM.
-3. **Bridge Check:** Run the bridge, scan the QR code from the terminal, and send a test message from a second phone. Ensure the Python backend logs the incoming message and the LLM formulates a reply.
+Implemented as a standard `argparse` script with sub‑commands:
+
+```text
+cli.py start-server      # uvicorn main:app --reload
+cli.py generate-report   # prints JSON report
+cli.py run-reengage      # triggers one scan
+cli.py list-alerts       # prints current alerts
+cli.py approval-request  # create a request from JSON file
+cli.py approval-decision # approve/reject a request
+```
+All commands import the same FastAPI router logic where possible to avoid duplication.
+
+---
+
+## 5. Frontend (React/Vite) – minimal but functional
+
+* `frontend/` folder with a Vite+React template.
+* Pages:
+  * Dashboard – shows owner wizard progress, catalog preview, alerts, pending approvals.
+  * Catalog – paginated table (uses `/owners/{id}/catalog`).
+  * Alerts – list from `/alerts`.
+  * Weekly Report – fetches `/weekly_report/generate` and displays JSON in collapsible sections.
+  * Approvals – list pending and allow approve/reject via buttons (calls the API).
+* Build output placed in `static/` and served by FastAPI via `StaticFiles` mount.
+
+---
+
+## 6. Docker & Docker‑Compose
+
+* **Dockerfile** – multi‑stage build: first stage installs Python deps, copies source; second stage runs `uvicorn`. 
+* **docker‑compose.yml** – services:
+  * `api` – the FastAPI app.
+  * `db` – PostgreSQL.
+  * `redis` – Redis.
+* Expose ports 8000 (API) and 3000 (frontend dev server, optional). 
+* Add health‑check endpoint (`/health`) that returns `OK`.
+
+---
+
+## 7. Tests (optional but recommended for completeness)
+
+* Use `pytest` + `httpx.AsyncClient` to hit each new endpoint.
+* Add a few integration tests that spin up the app with an in‑memory SQLite DB (for CI). 
+
+---
+
+## 8. Final Polish
+
+* Update README with quick‑start commands (`docker compose up --build`).
+* Ensure all new code follows the **Ponytail** rule: minimal, no unnecessary abstraction.
+* Run `ruff`/`flake8` lint and `black` formatting.
+
+---
+
+## Execution Plan
+
+1. Create missing router files & add endpoints.
+2. Add transaction wrappers and idempotent booking check.
+3. Implement approval‑request persistence (model + DB creation).
+4. Hook APScheduler into `main.py`.
+5. Scaffold `cli.py`.
+6. Add a minimal React frontend (only the directory structure and a placeholder `index.html` – full UI can be expanded later).
+7. Write Dockerfile and docker‑compose.yml.
+8. Run a quick sanity check: `docker compose up` → hit `/docs` and ensure all new endpoints appear.
+9. Commit all changes.
+
+When everything is verified, the goal is complete.
+
+---
+
+**Estimated effort**: ~2 days of coding & testing.
+
+<!-- GOAL_COMPLETE -->

@@ -261,22 +261,11 @@ async def notify_owner_via_whatsapp(business: Dict[str, Any], booking_data: Dict
 
     message = "\n".join(lines)
 
+    # Send through the anti-ban limiter (cap + cooldown + randomized 5-20s delay).
     try:
-        from outbound_limiter import check_can_send, record_send
-        if not check_can_send(owner_phone):
-            logger.warning("[!] Owner WhatsApp notification rate limited for %s", owner_phone)
-            return False
-        import httpx
-        bridge_url = settings.whatsapp_bridge_url or "http://localhost:3001"
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                f"{bridge_url}/send",
-                json={"to": owner_phone, "message": message},
-            )
-            if resp.status_code == 200:
-                record_send(owner_phone)
-                return True
-            return False
+        from outbound_limiter import send_whatsapp
+        client_id = business.get("client_id", 1)
+        return await send_whatsapp(owner_phone, message, client_id=client_id)
     except Exception as e:
         logger.warning("[!] Owner WhatsApp notification failed: %s", e)
         return False

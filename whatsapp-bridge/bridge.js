@@ -29,10 +29,12 @@ let whatsappInfo = null;
 
 async function forwardToAgent(event, data) {
   try {
+    const timestamp = Math.floor(Date.now() / 1000).toString();
     const body = JSON.stringify({ event, ...data });
-    const signature = crypto.createHmac('sha256', WA_BRIDGE_SECRET).update(body).digest('hex');
+    const signedPayload = timestamp + '.' + body;
+    const signature = crypto.createHmac('sha256', WA_BRIDGE_SECRET).update(signedPayload).digest('hex');
     const resp = await axios.post(AGENT_API_URL + '/api/webhook', body, {
-      headers: { 'Content-Type': 'application/json', 'X-Bridge-Signature': signature },
+      headers: { 'Content-Type': 'application/json', 'X-Bridge-Signature': signature, 'X-Bridge-Timestamp': timestamp },
       timeout: 10000,
     });
     if (resp.status >= 200 && resp.status < 300) return resp.data;
@@ -272,6 +274,35 @@ app.post('/send-image', async (req, res) => {
     const sent = await client.sendMessage(chatId, media, caption ? { caption } : {});
     return res.json({ status: 'sent', id: sent && sent.id ? String(sent.id) : null });
   } catch (e) { return res.status(500).json({ error: e.message }); }
+});
+
+// Health endpoint — used by the Python watchdog (whatsapp_connector.py) and the
+// admin health-check in main.py. Returns the same structure as /status but
+// includes a top-level status: "ok" and a server timestamp so callers can
+// distinguish a live-but-uninitialized bridge from a dead process.
+//
+// Also accepts an optional HMAC signature: if X-Bridge-Signature is present
+// the body is signed so the backend can verify authenticity (bridge↔backend
+// integrity).
+app.get('/health', (req, res) => {
+  const payload = {
+    status: 'ok',
+    connected: isConnected,
+    connection_state: connectionState,
+    whatsapp: whatsappInfo || {},
+    timestamp: Date.now(),
+  };
+  if (req.headers['x-bridge-signature']) {
+    const body = JSON.stringify(payload);
+    const signature = crypto.createHmac('sha256', WA_BRIDGE_SECRET).update(body).digest('hex');
+    res.set('X-Bridge-Signature', signature);
+  }
+  res.json(payload);
+});
+
+// Alias kept for backward compatibility
+app.get('/api/health', (req, res) => {
+  res.redirect(308, '/health');
 });
 
 app.get('/status', (req, res) => {

@@ -13,12 +13,15 @@ import os
 import sys
 import json
 import time
+import logging
 import subprocess
 import threading
 import asyncio
 import httpx
 from pathlib import Path
 from typing import Optional, Dict
+
+logger = logging.getLogger("whatsapp_connector")
 
 # Bridge location
 BRIDGE_DIR = Path(__file__).parent.parent / "whatsapp-bridge"
@@ -124,9 +127,10 @@ class WhatsAppConnector:
         self._reconnect_thread.start()
 
     def _reconnect_loop(self):
-        """Background loop that checks connection and reconnects if needed."""
+        """Background loop that checks connection and reconnects if needed.
+        Pings every 30s; 2 consecutive health-check failures => kill + restart.
+        Every restart is logged as an auditable event (see _log_restart_event)."""
         consecutive_failures = 0
-        restart_times: list = []
         while not self._reconnect_stop.is_set():
             try:
                 time.sleep(30)
@@ -134,34 +138,52 @@ class WhatsAppConnector:
                     break
                 status = self.get_status()
                 if not self.is_running:
-                    print("[WhatsAppConnector] Bridge process stopped unexpectedly, restarting...")
+                    logger.warning("[WhatsAppConnector] Bridge process stopped unexpectedly, restarting...")
                     self._restart_bridge()
                     continue
                 if status.get("bridge_online") and not status.get("connected"):
                     if self._connection_state in ("disconnected", "failed", "offline"):
-                        print("[WhatsAppConnector] Auto-reconnecting...")
+                        logger.info("[WhatsAppConnector] Auto-reconnecting...")
                         refresh_result = self.refresh_qr()
                         if refresh_result.get("status") == "refreshing":
-                            print("[WhatsAppConnector] QR refresh initiated for reconnect")
+                            logger.info("[WhatsAppConnector] QR refresh initiated for reconnect")
                 if not status.get("bridge_online"):
                     consecutive_failures += 1
                 else:
                     consecutive_failures = 0
                 if consecutive_failures >= 2:
-                    print("[WhatsAppConnector] Health check failed 2x, restarting bridge...")
+                    logger.warning("[WhatsAppConnector] Health check failed 2x, restarting bridge...")
+                    self._log_restart_event("health_check_2x_failed")
                     self._restart_bridge()
                     consecutive_failures = 0
             except Exception:
                 pass
 
-    def _restart_bridge(self):
-        """Kill and restart the bridge, track restart count and alert via Telegram."""
+    def _log_restart_event(self, reason: str):
+        """Emit a structured, auditable restart event. Repeated restarts in a
+        short window are themselves a strong signal that something upstream
+        (network, QR session, credentials) is wrong — so we always log and
+        escalate after a threshold."""
         now = time.time()
         self.restart_times = getattr(self, "restart_times", [])
         self.restart_times = [t for t in self.restart_times if now - t < 600]
         self.restart_times.append(now)
-        if len(self.restart_times) > 3:
-            self._alert_telegram("Bridge restarted >3 times in 10 minutes")
+        count = len(self.restart_times)
+        logger.warning(
+            "BRIDGE_RESTART_EVENT reason=%s restart_count=%s window=10m pid=%s",
+            reason, count, self.bridge_process.pid if self.bridge_process else None,
+        )
+        if count > 3:
+            # Repeated restarts => upstream problem. Alert loudly.
+            self._alert_telegram(
+                f"⚠️ WhatsApp bridge restarted {count} times in 10 minutes. "
+                f"Possible upstream issue (network/QR/credentials). Reason: {reason}"
+            )
+
+    def _restart_bridge(self):
+        """Kill and restart the bridge, track restart count and alert via Telegram."""
+        reason = "watchdog"
+        self._log_restart_event(reason)
         with self._lock:
             if self.bridge_process and self.is_running:
                 self.bridge_process.terminate()
@@ -174,7 +196,7 @@ class WhatsAppConnector:
             self._connection_state = "disconnected"
         start_result = self.start_bridge()
         if start_result.get("status") == "started":
-            print("[WhatsAppConnector] Bridge restarted successfully")
+            logger.info("[v] Bridge restarted successfully")
         else:
             print(f"[WhatsAppConnector] Bridge restart failed: {start_result.get('message')}")
 
@@ -372,8 +394,13 @@ class WhatsAppConnector:
 
     def send_message(self, to: str, message: str) -> Dict:
         try:
+            from outbound_limiter import check_can_send, record_send, get_delay
+            if not check_can_send(to):
+                return {"status": "error", "message": "Rate limit/cooldown active for this number"}
+            time.sleep(get_delay())
             resp = httpx.post(f"http://localhost:{BRIDGE_HTTP_PORT}/send", json={"to": to, "message": message}, timeout=15)
             if resp.status_code == 200:
+                record_send(to)
                 return resp.json()
             return {"status": "error", "message": f"Bridge returned {resp.status_code}: {resp.text}"}
         except Exception as e:

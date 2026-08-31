@@ -1,0 +1,60 @@
+# ──────────────────────────────────────────────────────────────────────
+# Backend Dockerfile — FastAPI + Python 3.11
+# Multi-stage: builder → runtime
+# ──────────────────────────────────────────────────────────────────────
+
+# ── Build stage ──────────────────────────────────────────────────────
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY agent-engine/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --prefix=/install -r /app/requirements.txt
+
+# ── Runtime stage ────────────────────────────────────────────────────
+FROM python:3.11-slim AS runtime
+
+# Create non-root user
+RUN groupadd -r wapuser && useradd -r -g wapuser -d /app -s /sbin/nologin wapuser
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed packages from builder
+COPY --from=builder /install /usr/local
+
+# Copy application code
+COPY agent-engine/ ./agent-engine
+COPY services/ ./services
+
+# Create directories
+RUN mkdir -p /app/uploads /app/chroma_db && \
+    chown -R wapuser:wapuser /app
+
+# Switch to non-root user
+USER wapuser
+
+# Expose port
+EXPOSE 8000
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Entrypoint
+CMD ["uvicorn", "agent-engine.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--timeout-keep-alive", "75", "--timeout-graceful-shutdown", "30", "--limit-max-requests", "1000"]

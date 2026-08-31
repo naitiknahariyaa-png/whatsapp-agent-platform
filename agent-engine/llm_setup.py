@@ -196,13 +196,13 @@ def get_llm() -> BaseChatModel:
             logger.info("[i] Falling back to OpenAI")
             return llm
 
-    # Last resort: MockLLM
+    # No fallback: raise error if no real LLM available
     logger.error("===============================================================")
     logger.error("[!!!] CRITICAL: No LLM provider available! [!!!]")
     logger.error("You MUST configure GROQ_API_KEY in agent-engine/.env")
-    logger.error("Currently falling back to MockLLM which only answers with dummy responses.")
+    logger.error("All LLM providers failed to initialize. Check the logs above for details.")
     logger.error("===============================================================")
-    return MockLLM()
+    raise RuntimeError("No LLM provider available. Please check your API keys and provider configuration.")
 
 
 def get_provider_status() -> dict:

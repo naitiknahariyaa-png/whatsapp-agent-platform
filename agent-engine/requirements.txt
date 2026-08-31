@@ -25,3 +25,8 @@ alembic
 asyncpg
 psycopg2-binary
 python-json-logger
+# --- test / CI dependencies ---
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+pytest-cov>=5.0.0
+flake8

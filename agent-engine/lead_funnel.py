@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import select, update, delete, String, Text, Integer, Boolean, DateTime, JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 from db import Base, async_session
+from crypto_fields import EncryptedString, hmac_phone_hash
 from config import settings
 from logging_setup import get_logger
 
@@ -25,7 +26,8 @@ logger = get_logger("lead_funnel")
 class LeadFunnelEnrollment(Base):
     __tablename__ = "lead_funnel_enrollments"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    phone_number: Mapped[str] = mapped_column(String(20), index=True)
+    phone_number: Mapped[str] = mapped_column(EncryptedString(255))  # encrypted at rest
+    phone_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)  # lookup key
     client_id: Mapped[int] = mapped_column(Integer, index=True)
     stage: Mapped[str] = mapped_column(String(30), default="new", index=True)
     trigger_event: Mapped[Optional[str]] = mapped_column(String(100))

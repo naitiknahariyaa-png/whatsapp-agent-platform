@@ -1,127 +1,376 @@
-version: '3.8'
+version: "3.9"
 
 services:
-  api:
+  # ──────────────────────────────────────────────────────────────────────
+  # Postgres — primary database
+  # ──────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: wap_postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-whatsapp_agent}
+      POSTGRES_USER: ${POSTGRES_USER:-wap_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wap_pass}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wap_user} -d ${POSTGRES_DB:-whatsapp_agent}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - wap_network
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Postgres Staging — separate DB for testing
+  # ──────────────────────────────────────────────────────────────────────
+  postgres_staging:
+    image: postgres:16-alpine
+    container_name: wap_postgres_staging
+    environment:
+      POSTGRES_DB: ${POSTGRES_STAGING_DB:-whatsapp_agent_staging}
+      POSTGRES_USER: ${POSTGRES_STAGING_USER:-wap_staging}
+      POSTGRES_PASSWORD: ${POSTGRES_STAGING_PASSWORD:-wap_staging_pass}
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_STAGING_USER:-wap_staging} -d ${POSTGRES_STAGING_DB:-whatsapp_agent_staging}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - wap_network
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Redis — caching, rate limiting, task queue
+  # ──────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: wap_redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - wap_network
+
+  # ──────────────────────────────────────────────────────────────────────
+  # ChromaDB — vector store for RAG
+  # ──────────────────────────────────────────────────────────────────────
+  chromadb:
+    image: chromadb/chroma:0.5.5
+    container_name: wap_chromadb
+    environment:
+      CHROMA_SERVER_HOST: 0.0.0.0
+      CHROMA_SERVER_HTTP_PORT: 8000
+      ANONYMIZED_TELEMETRY: "False"
+    volumes:
+      - chroma_data:/chroma/chroma
+    ports:
+      - "8001:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - wap_network
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Prometheus — metrics collection
+  # ──────────────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: wap_prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - wap_network
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Grafana — visualization
+  # ──────────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: wap_grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - wap_network
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Alertmanager — alert routing
+  # ──────────────────────────────────────────────────────────────────────
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: wap_alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "9093:9093"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9093/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - wap_network
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Backend — FastAPI application
+  # ──────────────────────────────────────────────────────────────────────
+  backend:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: wap-api
-    restart: always
-    ports:
-      - "127.0.0.1:8000:8000"
+      dockerfile: Dockerfile.backend
+    container_name: wap_backend
     environment:
-      - WAP_TERMINAL_MODE=1
-      - DATABASE_URL=sqlite+aiosqlite:///./wap_data.db
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-wap_user}:${POSTGRES_PASSWORD:-wap_pass}@postgres:5432/${POSTGRES_DB:-whatsapp_agent}
       - REDIS_URL=redis://redis:6379/0
-      - WHATSAPP_BRIDGE_URL=http://whatsapp-bridge:3001
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - LLM_PROVIDER=${LLM_PROVIDER:-groq}
-      - LLM_MODEL=${LLM_MODEL:-llama-3.3-70b-versatile}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - WHATSAPP_BRIDGE_URL=http://bridge:3001
+      - AGENT_API_URL=http://backend:8000
       - WA_BRIDGE_SECRET=${WA_BRIDGE_SECRET:-wap_bridge_secret_2026}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER:-groq}
+      - LLM_MODEL=${LLM_MODEL:-qwen/qwen3.8-27b}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - ENVIRONMENT=production
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./agent-engine:/app/agent-engine:ro
+      - ./services:/app/services:ro
+      - uploads:/app/uploads
+      - chroma_data:/chroma/chroma:ro
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
-    volumes:
-      - ./agent-engine:/app/agent-engine
-      - ./services:/app/services
-      - ./agent-engine/wap_data.db:/app/agent-engine/wap_data.db
-      - ./agent-engine/data:/app/agent-engine/data
+      chromadb:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 20s
+    restart: unless-stopped
     networks:
-      - wap-network
+      - wap_network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
 
-  celery-worker:
+  # ──────────────────────────────────────────────────────────────────────
+  # Backend Staging — separate instance for testing
+  # ──────────────────────────────────────────────────────────────────────
+  backend_staging:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: wap-celery-worker
-    restart: always
-    command: celery -A services.celery_app worker --loglevel=info --concurrency=2 -E
+      dockerfile: Dockerfile.backend
+    container_name: wap_backend_staging
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:///./wap_data.db
-      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_STAGING_USER:-wap_staging}:${POSTGRES_STAGING_PASSWORD:-wap_staging_pass}@postgres_staging:5432/${POSTGRES_STAGING_DB:-whatsapp_agent_staging}
+      - REDIS_URL=redis://redis:6379/1
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - WHATSAPP_BRIDGE_URL=http://bridge_staging:3001
+      - AGENT_API_URL=http://backend_staging:8000
+      - WA_BRIDGE_SECRET=${WA_BRIDGE_SECRET:-wap_bridge_secret_2026}
       - GROQ_API_KEY=${GROQ_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - LLM_PROVIDER=${LLM_PROVIDER:-groq}
-      - LLM_MODEL=${LLM_MODEL:-llama-3.3-70b-versatile}
+      - LLM_MODEL=${LLM_MODEL:-qwen/qwen3.8-27b}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - ENVIRONMENT=staging
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./agent-engine:/app/agent-engine:ro
+      - ./services:/app/services:ro
+      - uploads_staging:/app/uploads
     depends_on:
+      postgres_staging:
+        condition: service_healthy
       redis:
         condition: service_healthy
-      api:
+      chromadb:
         condition: service_healthy
-    volumes:
-      - ./agent-engine:/app/agent-engine
-      - ./services:/app/services
-      - ./agent-engine/wap_data.db:/app/agent-engine/wap_data.db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
     networks:
-      - wap-network
+      - wap_network
 
-  celery-beat:
+  # ──────────────────────────────────────────────────────────────────────
+  # Bridge — WhatsApp Web (Node.js + Puppeteer)
+  # ──────────────────────────────────────────────────────────────────────
+  bridge:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: wap-celery-beat
-    restart: always
-    command: celery -A services.celery_app beat --loglevel=info
-    environment:
-      - DATABASE_URL=sqlite+aiosqlite:///./wap_data.db
-      - REDIS_URL=redis://redis:6379/0
-    depends_on:
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./agent-engine:/app/agent-engine
-      - ./services:/app/services
-    networks:
-      - wap-network
-
-  whatsapp-bridge:
-    build:
-      context: ./whatsapp-bridge
-      dockerfile: Dockerfile
-    container_name: wap-whatsapp-bridge
-    restart: always
-    ports:
-      - "127.0.0.1:3001:3001"
+      dockerfile: Dockerfile.bridge
+    container_name: wap_bridge
     environment:
       - HTTP_PORT=3001
       - WS_PORT=3002
-      - AGENT_API_URL=http://api:8000
+      - AGENT_API_URL=http://backend:8000
       - WA_BRIDGE_SECRET=${WA_BRIDGE_SECRET:-wap_bridge_secret_2026}
-    volumes:
-      - ./whatsapp-bridge/.wwebjs_auth:/app/.wwebjs_auth
-      - ./whatsapp-bridge/.wwebjs_cache:/app/.wwebjs_cache
-    depends_on:
-      api:
-        condition: service_healthy
-    networks:
-      - wap-network
-
-  redis:
-    image: redis:7-alpine
-    container_name: wap-redis
-    restart: always
+      - CHROME_PATH=/usr/bin/chromium
+      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
     ports:
-      - "127.0.0.1:6379:6379"
+      - "3001:3001"
+      - "3002:3002"
     volumes:
-      - redis_data:/data
+      - bridge_auth:/app/.wwebjs_auth
+      - ./whatsapp-bridge:/app:ro
+    depends_on:
+      backend:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
       interval: 30s
       timeout: 10s
-      retries: 5
+      retries: 3
       start_period: 30s
+    restart: unless-stopped
     networks:
-      - wap-network
+      - wap_network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    shm_size: 2gb
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Bridge Staging — separate WhatsApp number for testing
+  # ──────────────────────────────────────────────────────────────────────
+  bridge_staging:
+    build:
+      context: .
+      dockerfile: Dockerfile.bridge
+    container_name: wap_bridge_staging
+    environment:
+      - HTTP_PORT=3001
+      - WS_PORT=3002
+      - AGENT_API_URL=http://backend_staging:8000
+      - WA_BRIDGE_SECRET=${WA_BRIDGE_SECRET:-wap_bridge_secret_2026}
+      - CHROME_PATH=/usr/bin/chromium
+      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+    ports:
+      - "3003:3001"
+      - "3004:3002"
+    volumes:
+      - bridge_staging_auth:/app/.wwebjs_auth
+      - ./whatsapp-bridge:/app:ro
+    depends_on:
+      backend_staging:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - wap_network
+    shm_size: 2gb
 
 volumes:
+  postgres_data:
+  postgres_staging_data:
   redis_data:
+  chroma_data:
+  bridge_auth:
+  bridge_staging_auth:
+  uploads:
+  uploads_staging:
+  prometheus_data:
+  grafana_data:
+  alertmanager_data:
 
 networks:
-  wap-network:
+  wap_network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16

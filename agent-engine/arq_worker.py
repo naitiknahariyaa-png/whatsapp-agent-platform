@@ -2,11 +2,14 @@
 ARQ Worker — async task queue for automation loops.
 
 Tasks registered:
-  - process_funnel: every 15 minutes
-  - process_nurture: every 10 minutes
-  - process_consent: every 30 minutes
-  - process_reengagement: weekly (cron)
-  - nightly_reindex: daily at 2 AM
+  - process_funnel (Lead Nurture Worker): every 4 hours — welcome messages and
+    24h/48h/48h follow-ups with opt-out checks.
+  - process_nurture (Appointment Guard): every 15 minutes — 24h confirmations
+    and 1h reminders, plus cancellation handling.
+  - process_consent: every 30 minutes — consent events and opt-outs.
+  - process_reengagement: weekly (cron, Mon 8 AM).
+  - generate_weekly_report: weekly (cron, Mon 9 AM) — CEO report + quality audit.
+  - nightly_reindex: daily at 2 AM.
 
 Requires Redis running. Falls back gracefully if Redis is unavailable.
 """
@@ -125,6 +128,18 @@ async def process_reengagement(ctx: Dict[str, Any]) -> Dict[str, int]:
         return {"error": str(e)}
 
 
+async def generate_weekly_report(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """Weekly CEO Report + LLM-graded quality audit (Part 3 background loop)."""
+    try:
+        from weekly_report import weekly_report_generator
+        result = await weekly_report_generator.generate()
+        logger.info(f"[v] ARQ weekly report task completed for client_id={result.client_id}")
+        return {"status": "ok", "client_id": result.client_id, "week_start": result.week_start}
+    except Exception as e:
+        logger.error(f"ARQ weekly report task failed: {e}")
+        return {"error": str(e)}
+
+
 async def nightly_reindex(ctx: Dict[str, Any]) -> Dict[str, Any]:
     """Nightly maintenance: purge old data, reindex vectors, cleanup."""
     try:
@@ -173,7 +188,7 @@ class ArqWorkerConfig:
         except Exception:
             return RedisSettings(host="localhost", port=6379)
 
-    @staticmethod
+        @staticmethod
     def get_tasks() -> Dict[str, Any]:
         return {
             "send_whatsapp_message": send_whatsapp_message,
@@ -183,16 +198,18 @@ class ArqWorkerConfig:
             "process_nurture": process_nurture,
             "process_consent": process_consent,
             "process_reengagement": process_reengagement,
+            "generate_weekly_report": generate_weekly_report,
             "nightly_reindex": nightly_reindex,
         }
 
     @staticmethod
     def get_schedules() -> list:
         return [
-            {"task": "process_funnel", "interval": 900},  # 15 minutes
-            {"task": "process_nurture", "interval": 600},  # 10 minutes
+            {"task": "process_funnel", "interval": 14400},  # 4 hours — Lead Nurture Worker
+            {"task": "process_nurture", "interval": 900},   # 15 minutes — Appointment Guard
             {"task": "process_consent", "interval": 1800},  # 30 minutes
             {"task": "process_reengagement", "cron": "0 8 * * 1"},  # Weekly Monday 8 AM
+            {"task": "generate_weekly_report", "cron": "0 9 * * 1"},  # Weekly Monday 9 AM
             {"task": "nightly_reindex", "cron": "0 2 * * *"},  # Daily at 2 AM
         ]
 
@@ -277,6 +294,7 @@ class FallbackScheduler:
         self._tasks.append(asyncio.create_task(self._nurture_loop()))
         self._tasks.append(asyncio.create_task(self._consent_loop()))
         self._tasks.append(asyncio.create_task(self._reengagement_loop()))
+        self._tasks.append(asyncio.create_task(self._weekly_report_loop()))
         self._tasks.append(asyncio.create_task(self._nightly_loop()))
 
     async def stop(self):
@@ -292,7 +310,7 @@ class FallbackScheduler:
                 await process_funnel({})
             except Exception as e:
                 logger.error(f"Fallback funnel error: {e}")
-            await asyncio.sleep(900)
+            await asyncio.sleep(14400)  # 4 hours
 
     async def _nurture_loop(self):
         while self._running:
@@ -300,7 +318,7 @@ class FallbackScheduler:
                 await process_nurture({})
             except Exception as e:
                 logger.error(f"Fallback nurture error: {e}")
-            await asyncio.sleep(600)
+            await asyncio.sleep(900)  # 15 minutes
 
     async def _consent_loop(self):
         while self._running:
@@ -317,6 +335,17 @@ class FallbackScheduler:
             except Exception as e:
                 logger.error(f"Fallback reengagement error: {e}")
             await asyncio.sleep(604800)
+
+    async def _weekly_report_loop(self):
+        """Generate weekly CEO report every Monday at 9 AM UTC."""
+        while self._running:
+            try:
+                now = datetime.now(timezone.utc)
+                if now.weekday() == 0 and now.hour == 9:
+                    await generate_weekly_report({})
+            except Exception as e:
+                logger.error(f"Fallback weekly report error: {e}")
+            await asyncio.sleep(3600)
 
     async def _nightly_loop(self):
         while self._running:

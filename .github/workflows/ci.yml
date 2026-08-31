@@ -1,4 +1,4 @@
-name: CI/CD
+name: CI
 
 on:
   push:
@@ -7,12 +7,42 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  lint-and-test:
     name: Lint & Test
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.14"]
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: wap
+          POSTGRES_PASSWORD: wap
+          POSTGRES_DB: wap_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://wap:wap@localhost:5432/wap_test
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET_KEY: ci_test_secret
+      WA_BRIDGE_SECRET: ci_test_bridge_secret
 
     steps:
       - uses: actions/checkout@v4
@@ -26,27 +56,39 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r agent-engine/requirements.txt
-          pip install pytest pytest-cov flake8 httpx
+          pip install pytest pytest-asyncio pytest-cov flake8 httpx
 
-      - name: Lint with flake8
+      - name: Lint with flake8 (syntax-blocking)
         run: |
           cd agent-engine
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+      - name: Lint with flake8 (style, non-blocking)
+        run: |
+          cd agent-engine
+          flake8 . --count --exit-zero --max-complexity=12 --max-line-length=127 --statistics
 
       - name: Run tests
         run: |
           cd agent-engine
           python -m pytest tests/ -v --cov=. --cov-report=term-missing --cov-fail-under=50
 
-  deploy:
-    name: Deploy
-    needs: test
+  frontend:
+    name: Frontend build & test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy to Railway
-        run: echo "Deploy step - triggered on main push"
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deps
+        run: cd frontend-react && npm ci --no-audit --no-fund
+
+      - name: Type-check + build
+        run: cd frontend-react && npm run build
+
+      - name: UI smoke tests
+        run: cd frontend-react && npm test

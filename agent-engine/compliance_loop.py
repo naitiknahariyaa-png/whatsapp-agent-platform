@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import select, delete, String, Text, Integer, Boolean, DateTime, JSON, ForeignKey, func
 from sqlalchemy.orm import Mapped, mapped_column
 from db import Base, async_session
+from crypto_fields import EncryptedString, hmac_phone_hash
 from config import settings
 from logging_setup import get_logger
 
@@ -25,7 +26,8 @@ logger = get_logger("compliance_loop")
 class ConsentRecordDB(Base):
     __tablename__ = "consent_records"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    phone_number: Mapped[str] = mapped_column(String(20), index=True)
+    phone_number: Mapped[str] = mapped_column(EncryptedString(255))  # encrypted at rest
+    phone_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)  # lookup key
     client_id: Mapped[int] = mapped_column(Integer, index=True)
     consent_type: Mapped[str] = mapped_column(String(50))
     granted: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -86,9 +88,10 @@ class ComplianceLoop:
             return False
 
         async with async_session() as session:
+            phone_h = hmac_phone_hash(phone_number)
             result = await session.execute(
                 select(ConsentRecordDB).where(
-                    ConsentRecordDB.phone_number == phone_number,
+                    ConsentRecordDB.phone_hash == phone_h,
                     ConsentRecordDB.client_id == client_id,
                     ConsentRecordDB.consent_type == "marketing",
                 ).order_by(ConsentRecordDB.recorded_at.desc()).limit(1)

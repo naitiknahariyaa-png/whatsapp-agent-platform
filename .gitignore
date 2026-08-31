@@ -20,3 +20,27 @@ __pycache__/
 Thumbs.db
 .vscode/
 .idea/
+
+# WhatsApp Bridge session & browser cache (contains session secrets - NEVER commit)
+whatsapp-bridge/.wwebjs_auth/
+whatsapp-bridge/.wwebjs_cache/
+whatsapp-bridge/*.log
+
+# Runtime logs & temp artifacts
+*.log
+agent-engine/live_backend.log
+agent-engine/cli_server.log
+_t.log
+_e2e.log
+_e2e_result.json
+
+# Local business data (owner's private business info)
+agent-engine/business_data.json
+
+# Frontend build output & caches
+frontend-react/node_modules/
+frontend-react/dist/
+frontend-react/test-results/
+.ruff_cache/
+.pytest_cache/
+

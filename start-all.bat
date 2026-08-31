@@ -1,49 +1,31 @@
 @echo off
-setlocal enabledelayedexpansion
-echo ==========================================
-echo WhatsApp Agent Platform - Quick Start
-echo ==========================================
+chcp 65001 >nul
+title WhatsApp Agent Platform - Start All Services
+color 0B
 
-REM ── Find Python / venv ─────────────────────────────────────────────────────
+echo ==========================================
+echo WhatsApp Agent Platform - Starting All
+echo ==========================================
+echo.
+
 set "PYTHON=python"
-if exist ".venv\Scripts\python.exe" (
-    set "PYTHON=.venv\Scripts\python.exe"
-    echo [i] Using venv: .venv
-) else if exist "agent-engine\.venv\Scripts\python.exe" (
-    set "PYTHON=agent-engine\.venv\Scripts\python.exe"
-    echo [i] Using venv: agent-engine\.venv
-) else if exist "venv\Scripts\python.exe" (
-    set "PYTHON=venv\Scripts\python.exe"
-    echo [i] Using venv: venv
+set "ROOT=%~dp0"
+set "AGENT_ENGINE=%ROOT%agent-engine"
+
+REM --- Check Python venv ------------------------------------------------------
+if exist "%AGENT_ENGINE%\.venv\Scripts\python.exe" (
+    set "PYTHON=%AGENT_ENGINE%\.venv\Scripts\python.exe"
+    echo [v] Using venv Python
 ) else (
-    echo [i] No virtual environment found. Using system Python.
+    echo [w] No venv found, using system Python
 )
 
-REM ── Dependency check: Python packages ────────────────────────────────────────
-echo [0/4] Checking Python dependencies...
-for %%M in (fastapi uvicorn httpx sqlalchemy aiosqlite pydantic pydantic-settings) do (
-    %PYTHON% -c "import %%M" 2>nul
-    if errorlevel 1 (
-        echo [w] Missing Python package: %%M
-        echo [i] Installing missing dependencies...
-        %PYTHON% -m pip install -q fastapi uvicorn httpx sqlalchemy aiosqlite "pydantic[dotenv]" pydantic-settings 2>nul
-        if errorlevel 1 (
-            echo [!] Failed to install dependencies. Please run: pip install -r agent-engine/requirements.txt
-        ) else (
-            echo [v] Dependencies installed successfully.
-        )
-        goto :deps_done
-    )
-)
-echo [v] All Python dependencies OK.
-:deps_done
-
-REM ── Dependency check: Node.js ─────────────────────────────────────────────
-echo [0/4] Checking Node.js for WhatsApp bridge...
-where node >nul 2>nul
+REM --- Check Node.js ----------------------------------------------------------
+echo [i] Checking Node.js...
+node --version >nul 2>&1
 if errorlevel 1 (
-    echo [w] Node.js not found. Bridge will not start (local bridge mode).
-    echo [i] Install Node.js from https://nodejs.org to use the WhatsApp bridge.
+    echo [w] Node.js not found. Bridge will not start.
+    echo     Install from https://nodejs.org
     set "NODE_AVAILABLE=0"
 ) else (
     for /f "delims=" %%V in ('node --version 2^>nul') do set "NODE_VERSION=%%V"
@@ -51,108 +33,85 @@ if errorlevel 1 (
     set "NODE_AVAILABLE=1"
 )
 
-REM ── Check if backend is already running ────────────────────────────────────
-echo [1/4] Checking backend status...
-curl -s -o nul -w "%%{http_code}" http://localhost:8000/health > tmp_health.txt 2>nul
-set /p HEALTH=<tmp_health.txt
-del tmp_health.txt 2>nul
-if "%HEALTH%"=="200" (
-    echo [i] Backend already running on port 8000
-    set "BACKEND_STARTED=1"
-) else (
-    echo [2/4] Starting Backend API...
-    start "Backend API" cmd /c "cd agent-engine && ..\%PYTHON% -m uvicorn main:app --host 0.0.0.0 --port 8000"
-    set "BACKEND_STARTED=0"
-)
-
-REM ── Check if bridge is already running ─────────────────────────────────────
-echo [3/4] Checking WhatsApp bridge status...
-curl -s -o nul -w "%%{http_code}" http://localhost:3001/health > tmp_bridge.txt 2>nul
-set /p BRIDGE_HEALTH=<tmp_bridge.txt
-del tmp_bridge.txt 2>nul
-if "%BRIDGE_HEALTH%"=="200" (
-    echo [i] WhatsApp bridge already running on port 3001
-    set "BRIDGE_STARTED=1"
-) else (
-    if "%NODE_AVAILABLE%"=="1" (
-        if exist "whatsapp-bridge\node_modules" (
-            echo [3/4] Starting WhatsApp Bridge...
-            start "WhatsApp Bridge" cmd /c "cd whatsapp-bridge && node bridge.js"
-            set "BRIDGE_STARTED=0"
-        ) else (
-            echo [w] Bridge node_modules missing. Installing...
-            pushd whatsapp-bridge
-            npm install 2>nul
-            if errorlevel 1 (
-                echo [!] npm install failed. Bridge will not start.
-            ) else (
-                echo [v] Bridge dependencies installed. Starting bridge...
-                start "WhatsApp Bridge" cmd /c "cd whatsapp-bridge && node bridge.js"
-            )
-            popd
-            set "BRIDGE_STARTED=0"
-        )
+REM --- Clone required AI repos if missing ----------------------------------------------------------
+if not exist "%ROOT%libs" (
+    echo [i] Creating libs directory and cloning repositories...
+    mkdir "%ROOT%libs"
+    cd "%ROOT%libs"
+    if not exist "whisper" (
+        echo [i] Cloning Whisper repository...
+        git clone https://github.com/openai/whisper.git
     ) else (
-        echo [i] Skipping bridge (Node.js not available)
-        set "BRIDGE_STARTED=1"
+        echo [v] Whisper repo already exists.
     )
+    if not exist "langchain" (
+        echo [i] Cloning LangChain repository...
+        git clone https://github.com/langchain-ai/langchain.git
+    ) else (
+        echo [v] LangChain repo already exists.
+    )
+    cd "%ROOT%"
+) else (
+    echo [v] libs directory already exists.
 )
 
-REM ── Wait for backend to be ready ───────────────────────────────────────────
-if "%BACKEND_STARTED%"=="0" (
-    echo [i] Waiting for backend to start...
-    for /l %%i in (1,1,30) do (
-        timeout /t 1 /nobreak >nul
-        curl -s -o nul -w "%%{http_code}" http://localhost:8000/health > tmp_health.txt 2>nul
-        set /p HEALTH=<tmp_health.txt
-        del tmp_health.txt 2>nul
-        if "!HEALTH!"=="200" (
-            echo [v] Backend is ready!
-            goto :backend_ready
-        )
-    )
-    echo [w] Backend did not respond within 30 seconds. Continuing anyway...
+REM --- Install Python dependencies ----------------------------------------------------------
+if exist "%AGENT_ENGINE%\.venv" (
+    echo [i] Installing dependencies into virtual environment...
+    "%AGENT_ENGINE%\.venv\Scripts\pip" install -r "%AGENT_ENGINE%\requirements.txt"
+) else (
+    echo [i] Installing dependencies globally...
+    pip install -r "%AGENT_ENGINE%\requirements.txt"
 )
 
-:backend_ready
-REM ── Wait for bridge to be ready (if started) ────────────────────────────────
-if defined BRIDGE_STARTED if "%BRIDGE_STARTED%"=="0" (
-    echo [i] Waiting for bridge to start...
-    for /l %%i in (1,1,20) do (
-        timeout /t 1 /nobreak >nul
-        curl -s -o nul -w "%%{http_code}" http://localhost:3001/health > tmp_bridge.txt 2>nul
-        set /p BRIDGE_HEALTH=<tmp_bridge.txt
-        del tmp_bridge.txt 2>nul
-        if "!BRIDGE_HEALTH!"=="200" (
-            echo [v] Bridge is ready!
-            goto :bridge_ready
-        )
-    )
-    echo [w] Bridge did not respond within 20 seconds. Check logs in the bridge window.
+REM --- Start Backend ----------------------------------------------------------
+echo.
+echo [1/4] Starting Backend API (port 8000)...
+start "Backend API" cmd /c "cd /d "%AGENT_ENGINE%" && "%PYTHON%" -m uvicorn main:app --host 0.0.0.0 --port 8000"
+
+REM --- Wait for backend -------------------------------------------------------
+echo [2/3] Waiting for backend to be ready...
+set /a retries=0
+:wait_backend
+set /a retries+=1
+if %retries% gtr 60 (
+    echo [ERROR] Backend did not start within 120 seconds.
+    pause
+    exit /b 1
 )
-:bridge_ready
+timeout /t 2 /nobreak >nul
+powershell -Command "$r = Invoke-WebRequest -Uri 'http://localhost:8000/health' -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 }"
+if errorlevel 1 goto wait_backend
+echo [v] Backend is ready!
+
+REM --- Start Bridge -----------------------------------------------------------
+if "%NODE_AVAILABLE%"=="1" (
+    echo [3/3] Starting WhatsApp Bridge (port 3001)...
+    if exist "%ROOT%whatsapp-bridge\node_modules" (
+        start "WhatsApp Bridge" cmd /c "cd /d "%ROOT%whatsapp-bridge" && node bridge.js"
+        echo [v] Bridge starting...
+    ) else (
+        echo [w] Bridge node_modules missing. Run: cd whatsapp-bridge && npm install
+    )
+) else (
+    echo [i] Skipping bridge (Node.js not available)
+)
+
+REM --- Open Dashboard ---------------------------------------------------------
+echo.
+echo [i] Opening dashboard in browser...
+timeout /t 2 /nobreak >nul
+start http://localhost:8000/frontend/dashboard.html
 
 echo.
-echo ================================================
-echo Platform Services Running:
-echo - Main API:       http://localhost:8000
-echo - API Docs:       http://localhost:8000/docs
-echo - Bridge:         http://localhost:3001
-echo - QR Generator:   http://localhost:8000/api/whatsapp/qr
-echo - CLI Tool:       python wap-cli.py
-echo - Health Check:   http://localhost:8000/health
-echo - Diagnostics:    http://localhost:8000/api/diagnostic
-echo - Templates API:  http://localhost:8000/api/templates
-echo - Professions:    http://localhost:8000/api/templates/profession
+echo ==========================================
+echo   All services started!
+echo ==========================================
+echo   Backend : http://localhost:8000
+echo   Bridge  : http://localhost:3001
+echo   Dashboard: http://localhost:8000/frontend/dashboard.html
 echo.
-echo ================================================
-echo [i] Open http://localhost:8000 in your browser for the dashboard.
-echo [i] Use wap-cli.py commands to manage the platform.
-echo ================================================
-
-timeout /t 3 /nobreak >nul
-%PYTHON% wap-cli.py
-
-echo.
-echo Press any key to exit...
-pause >nul
+echo   Close this window when done.
+echo   To stop services, use stop.bat or close their windows.
+echo ==========================================
+pause

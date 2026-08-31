@@ -123,5 +123,3 @@ def get_vertical(name: str) -> Optional[ProfessionalServiceBot]:
 def list_verticals() -> List[str]:
     """List all registered verticals"""
     return list(VERTICAL_REGISTRY.keys())
-</arg_value>
-</write_to_file></tool_call>

@@ -4,26 +4,69 @@ For full functionality, run Docker with: docker-compose up -d
 """
 import os
 import json
+import logging
 os.environ['SQLALCHEMY_SKIP_PLATFORM_CHECK'] = '1'  # Fix for Windows
+
+logger = logging.getLogger("db")
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import String, Text, Integer, Float, Boolean, DateTime, JSON, ForeignKey, select
+from crypto_fields import EncryptedString, hmac_phone_hash
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional, List, Dict
 import os
 
 # Try PostgreSQL first, fallback to SQLite
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 if not DATABASE_URL:
-    # Use absolute path to avoid DB being created in wrong directory
-    DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wap_data.db")
-    DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
+    # Use user temp directory to avoid permission issues
+    temp_dir = os.environ.get('TEMP', 'C:\\temp')
+    DB_PATH = os.path.join(temp_dir, "wap", "wap_data.db")
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    # Convert to forward slashes for SQLite URL on Windows
+    DB_PATH_URL = DB_PATH.replace("\\", "/")
+    DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH_URL}"
+    print(f"[i] Using database: {DATABASE_URL}")
+else:
+    print(f"[i] Using database from env: {DATABASE_URL}")
 
 print(f"[i] Using database: {DATABASE_URL.split('://')[0]}")
 
-engine = create_async_engine(DATABASE_URL, echo=False, pool_size=20, max_overflow=10)
+# Connection pool settings to prevent idle timeouts
+engine_args = {
+    "echo": False,
+    "pool_size": 20,
+    "max_overflow": 10,
+    "pool_pre_ping": True,        # Verify connections before use
+    "pool_recycle": 300,          # Recycle connections every 5 minutes
+    "pool_timeout": 30,           # Timeout getting connection from pool
+}
+
+# Add PostgreSQL-specific settings
+if DATABASE_URL.startswith("postgresql"):
+    engine_args.update({
+        "pool_pre_ping": True,
+        "pool_recycle": 300,
+        "pool_timeout": 30,
+        "connect_args": {
+            "server_settings": {
+                "application_name": "whatsapp_agent",
+                "tcp_keepalives_idle": "300",
+                "tcp_keepalives_interval": "30",
+                "tcp_keepalives_count": "3",
+            },
+            "command_timeout": 60,
+        }
+    })
+
+print(f"[i] Creating engine with URL: {DATABASE_URL}")
+print(f"[i] Engine args: {engine_args}")
+engine = create_async_engine(DATABASE_URL, **engine_args)
+print(f"[i] Engine created successfully")
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+print(f"[i] Async session maker created")
 
 
 class Base(DeclarativeBase):
@@ -46,7 +89,8 @@ class Conversation(Base):
     __tablename__ = "conversations"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True)
-    phone_number: Mapped[str] = mapped_column(String(20), index=True)
+    phone_number: Mapped[str] = mapped_column(EncryptedString(255))  # encrypted at rest
+    phone_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)  # lookup key
     contact_name: Mapped[Optional[str]] = mapped_column(String(255))
     session_id: Mapped[Optional[str]] = mapped_column(String(100))
     status: Mapped[str] = mapped_column(String(20), default="active")
@@ -60,8 +104,9 @@ class Message(Base):
     __tablename__ = "messages"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True)
-    conversation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("conversations.id"))
-    phone_number: Mapped[str] = mapped_column(String(20), index=True)
+    conversation_id: Mapped[Optional[int]] = mapped_column(ForeignKey("conversations.id"), index=True)
+    phone_number: Mapped[str] = mapped_column(EncryptedString(255))  # encrypted at rest
+    phone_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)  # lookup key
     message_type: Mapped[str] = mapped_column(String(20), default="text")
     content: Mapped[Optional[str]] = mapped_column(Text)
     media_url: Mapped[Optional[str]] = mapped_column(Text)
@@ -74,7 +119,8 @@ class Contact(Base):
     __tablename__ = "contacts"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True)
-    phone_number: Mapped[str] = mapped_column(String(20), index=True)
+    phone_number: Mapped[str] = mapped_column(EncryptedString(255))  # encrypted at rest
+    phone_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)  # lookup key
     name: Mapped[Optional[str]] = mapped_column(String(255))
     email: Mapped[Optional[str]] = mapped_column(String(255))
     tags: Mapped[Optional[List[str]]] = mapped_column(JSON)
@@ -92,7 +138,8 @@ class Appointment(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True)
     contact_id: Mapped[Optional[int]] = mapped_column(ForeignKey("contacts.id"))
-    phone_number: Mapped[str] = mapped_column(String(20))
+    phone_number: Mapped[str] = mapped_column(EncryptedString(255))  # encrypted at rest
+    phone_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)  # lookup key
     title: Mapped[Optional[str]] = mapped_column(String(255))
     description: Mapped[Optional[str]] = mapped_column(Text)
     appointment_date: Mapped[Optional[str]] = mapped_column(String(20))
@@ -120,10 +167,11 @@ class Booking(Base):
     party_size: Mapped[Optional[int]] = mapped_column(Integer)
     service_type: Mapped[Optional[str]] = mapped_column(String(255))
     customer_name: Mapped[Optional[str]] = mapped_column(String(255))
-    customer_contact: Mapped[Optional[str]] = mapped_column(String(255))
+    customer_contact: Mapped[Optional[str]] = mapped_column(EncryptedString(255))  # encrypted at rest
     notes: Mapped[Optional[str]] = mapped_column(Text)
     raw_extracted: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
     source: Mapped[str] = mapped_column(String(50), default="web_chat")
+    conversation_id: Mapped[Optional[str]] = mapped_column(String(255), index=True)  # idempotency key (dedup retries)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -155,7 +203,8 @@ class ConversationSession(Base):
     __tablename__ = "conversation_sessions"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True)
-    phone_number: Mapped[str] = mapped_column(String(20), index=True)
+    phone_number: Mapped[str] = mapped_column(EncryptedString(255))  # encrypted at rest
+    phone_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)  # lookup key
     session_state: Mapped[str] = mapped_column(String(50), default="browsing")
     intent: Mapped[Optional[str]] = mapped_column(String(50))
     entities: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
@@ -214,7 +263,8 @@ class SellerOrder(Base):
     platform: Mapped[str] = mapped_column(String(20), index=True)
     order_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     customer_name: Mapped[Optional[str]] = mapped_column(String(255))
-    customer_phone: Mapped[Optional[str]] = mapped_column(String(20))
+    customer_phone: Mapped[Optional[str]] = mapped_column(EncryptedString(255))  # encrypted at rest
+    customer_phone_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)  # lookup key
     quantity: Mapped[int] = mapped_column(Integer, default=1)
     unit_price: Mapped[float] = mapped_column(Float)
     tax: Mapped[float] = mapped_column(Float, default=0.0)
@@ -270,16 +320,168 @@ class PriceAlert(Base):
     is_resolved: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+# ──────────────────────────────────────────────────────────────────────
+# Multi-Tenant Owner Onboarding (Section 2)
+# Owner = the business that signs up. Client = the existing row in
+# `clients` that represents their WhatsApp number routing. We keep both
+# so we don't have to migrate the 19 existing messages.
+# Every row below MUST carry owner_id; tenant isolation is enforced in
+# the route layer and every query in onboarding.py.
+# ──────────────────────────────────────────────────────────────────────
+
+class Owner(Base):
+    """Owner = business that signs up via the onboarding wizard.
+
+    One-to-one with `Client` via `client_id` (a Client may exist before
+    the Owner does; we link them after onboarding completes).
+    """
+    __tablename__ = "owners"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    client_id: Mapped[Optional[int]] = mapped_column(ForeignKey("clients.id"), index=True)
+
+    # Identity / auth
+    business_name: Mapped[str] = mapped_column(String(255))
+    owner_name: Mapped[str] = mapped_column(String(255))
+    owner_phone: Mapped[str] = mapped_column(EncryptedString(255))
+    owner_phone_hash: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+    owner_email: Mapped[Optional[str]] = mapped_column(String(255))
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255))  # bcrypt
+    business_category: Mapped[str] = mapped_column(String(50), default="general")
+    # restaurant / clinic / salon / retail / agency / doctor / lawyer / ca / other
+
+    # Business profile
+    address: Mapped[Optional[str]] = mapped_column(Text)
+    business_hours: Mapped[Optional[str]] = mapped_column(String(255))  # e.g. "Mon-Sat 9am-9pm"
+    timezone: Mapped[str] = mapped_column(String(50), default="Asia/Kolkata")
+    languages: Mapped[Optional[List[str]]] = mapped_column(JSON, default=list)  # ["hi","en"]
+    brand_voice: Mapped[str] = mapped_column(String(20), default="casual")  # formal / casual / playful
+    currency: Mapped[str] = mapped_column(String(8), default="INR")
+
+    # Escalation / ops
+    escalation_contact: Mapped[Optional[str]] = mapped_column(String(255))
+    escalation_channel: Mapped[Optional[str]] = mapped_column(String(20))  # whatsapp / slack / email
+    quiet_hours_start: Mapped[Optional[str]] = mapped_column(String(8))  # "22:00"
+    quiet_hours_end: Mapped[Optional[str]] = mapped_column(String(8))    # "08:00"
+
+    # Onboarding state
+    is_active: Mapped[bool] = mapped_column(default=True)
+    onboarded_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class CatalogItem(Base):
+    """An item the owner offers — menu item, service, SKU, etc.
+
+    Every row is scoped to one Owner (tenant isolation). Ranking is a
+    composite of priority (owner-set) + popularity_score (incremented
+    on orders) + margin. Section 3 reads this table.
+    """
+    __tablename__ = "catalog_items"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("owners.id"), index=True)
+
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    price: Mapped[float] = mapped_column(Float, default=0.0)
+    currency: Mapped[str] = mapped_column(String(8), default="INR")
+    prep_time_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    prep_time_tier: Mapped[str] = mapped_column(String(10), default="normal")  # fast / normal / slow
+    category: Mapped[Optional[str]] = mapped_column(String(100))
+    tags: Mapped[Optional[List[str]]] = mapped_column(JSON, default=list)  # veg, popular, budget, etc.
+
+    available: Mapped[bool] = mapped_column(Boolean, default=True)
+    popularity_score: Mapped[int] = mapped_column(Integer, default=0)
+    margin: Mapped[float] = mapped_column(Float, default=0.0)  # 0.0–1.0, used for ranking tie-breaks
+    priority: Mapped[int] = mapped_column(Integer, default=0)  # owner-set, higher = shown first
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class Policy(Base):
+    """Per-owner business policies. One-to-one with Owner.
+
+    `relaxation_policy` and `max_autonomous_discount_pct` are what the
+    Section 3 reply engine consults to decide whether to relax a
+    constraint, offer a discount, or escalate to a human.
+    """
+    __tablename__ = "policies"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("owners.id"), index=True, unique=True)
+
+    refund_policy: Mapped[Optional[str]] = mapped_column(Text)
+    cancellation_policy: Mapped[Optional[str]] = mapped_column(Text)
+    delivery_radius_km: Mapped[Optional[float]] = mapped_column(Float)
+    min_order_amount: Mapped[Optional[float]] = mapped_column(Float)
+    discount_rules: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    quiet_hours: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+
+    # Section-3 knobs
+    relaxation_policy: Mapped[str] = mapped_column(String(20), default="prefer_speed")
+    # prefer_speed (relax time first) / prefer_budget (relax time last) / strict (no relaxation)
+    fastest_guarantee_minutes: Mapped[int] = mapped_column(Integer, default=15)
+    max_autonomous_discount_pct: Mapped[float] = mapped_column(Float, default=5.0)
+    max_autonomous_substitution: Mapped[bool] = mapped_column(Boolean, default=True)
+    escalation_triggers: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class OwnerApiKey(Base):
+    """Encrypted third-party API keys per owner (WhatsApp, payments, etc.).
+
+    The plaintext is encrypted at rest via EncryptedString. The
+    `key_mask` is what the owner sees in the dashboard — a short
+    fingerprint, never the full key. The full plaintext is never
+    returned by any GET route after the initial insert.
+    """
+    __tablename__ = "owner_api_keys"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("owners.id"), index=True)
+
+    provider: Mapped[str] = mapped_column(String(50))  # whatsapp_business / razorpay / stripe / google_calendar
+    key_id: Mapped[Optional[str]] = mapped_column(String(255))  # public identifier (e.g. rzp_test_xxx)
+    encrypted_key: Mapped[Optional[str]] = mapped_column(EncryptedString(2048))
+    encrypted_secret: Mapped[Optional[str]] = mapped_column(EncryptedString(2048))
+    key_mask: Mapped[str] = mapped_column(String(40))  # e.g. "****aB12" — safe to display
+
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 from broadcast import BroadcastList, BroadcastCampaign  # noqa: F401 - ensure tables are registered
-from lead_gen import Lead  # noqa: F401 - ensure leads table are registered
+# NOTE: Lead is intentionally NOT imported here at module scope. lead_gen.py also
+# imports from db (Base, async_session) at module scope, so a module-level
+# `from lead_gen import Lead` here can trip a "partially initialized module"
+# ImportError depending on import order. db.Lead is exposed lazily via the
+# module __getattr__ below so `from db import Lead` still works for consumers.
+
+def __getattr__(name):
+    """PEP 562 lazy attribute: exposes db.Lead on first use (avoids circular import)."""
+    if name == "Lead":
+        from lead_gen import Lead
+        return Lead
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def register_loop_models():
-    """Lazy import of Phase 3 loop models to avoid circular imports."""
+async def register_loop_models():
+    """Lazy import of Phase 3 loop + extension models, then create any
+    tables that were not yet part of Base.metadata when init_db() ran.
+
+    Without this final create_all pass, models imported lazily here (loops,
+    QA logs, advisory turns) would never get their tables on a fresh DB.
+    """
+    from lead_gen import Lead                        # noqa: F401 - register leads table
     from lead_funnel import LeadFunnelEnrollment      # noqa: F401
     from appointment_nurture import AppointmentNurtureEnrollment  # noqa: F401
     from compliance_loop import ConsentRecordDB, DataRetentionLog  # noqa: F401
     from reengagement_loop import ReengagementLog     # noqa: F401
+    from db_extensions import CompanyReport, QALog, AdvisoryTurn  # noqa: F401
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
 
 async def get_session():
@@ -288,26 +490,29 @@ async def get_session():
 
 
 async def init_db():
+    print(f"[i] Initializing database...")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    print(f"[i] Database tables created/verified")
     print("[v] Database tables created/verified")
 
 
 async def save_message(session, phone_number, content, direction="incoming", message_type="text",
-                       client_id: int = 1):
+                        client_id: int = 1):
+    phone_h = hmac_phone_hash(phone_number)
     result = await session.execute(
-        select(Conversation).where(Conversation.phone_number == phone_number,
+        select(Conversation).where(Conversation.phone_hash == phone_h,
                                    Conversation.client_id == client_id)
         .order_by(Conversation.last_message_at.desc()).limit(1)
     )
     conversation = result.scalar_one_or_none()
     if not conversation:
-        conversation = Conversation(phone_number=phone_number, status="active", client_id=client_id)
+        conversation = Conversation(phone_number=phone_number, phone_hash=phone_h, status="active", client_id=client_id)
         session.add(conversation)
         await session.flush()
     conversation.last_message_at = datetime.now(timezone.utc)
     conversation.unread_count = (conversation.unread_count or 0) + 1 if direction == "incoming" else 0
-    message = Message(conversation_id=conversation.id, phone_number=phone_number,
+    message = Message(conversation_id=conversation.id, phone_number=phone_number, phone_hash=phone_h,
                       content=content, direction=direction, message_type=message_type,
                       client_id=client_id)
     session.add(message)
@@ -316,8 +521,9 @@ async def save_message(session, phone_number, content, direction="incoming", mes
 
 
 async def get_conversation_history(session, phone_number, limit=20, client_id: int = 1):
+    phone_h = hmac_phone_hash(phone_number)
     result = await session.execute(
-        select(Message).where(Message.phone_number == phone_number,
+        select(Message).where(Message.phone_hash == phone_h,
                               Message.client_id == client_id)
         .order_by(Message.created_at.desc()).limit(limit)
     )
@@ -326,18 +532,20 @@ async def get_conversation_history(session, phone_number, limit=20, client_id: i
 
 
 async def upsert_contact(session, phone_number, client_id: int = 1, **kwargs):
+    phone_h = hmac_phone_hash(phone_number)
     result = await session.execute(
-        select(Contact).where(Contact.phone_number == phone_number,
+        select(Contact).where(Contact.phone_hash == phone_h,
                               Contact.client_id == client_id)
     )
     contact = result.scalar_one_or_none()
     if not contact:
-        contact = Contact(phone_number=phone_number, client_id=client_id, **kwargs)
+        contact = Contact(phone_number=phone_number, phone_hash=phone_h, client_id=client_id, **kwargs)
         session.add(contact)
     else:
         for key, value in kwargs.items():
             if value is not None:
                 setattr(contact, key, value)
+        contact.phone_hash = phone_h
     await session.commit()
     return contact
 
@@ -387,16 +595,17 @@ async def get_client_usage(session, client_id: int):
 
 async def get_or_create_session(session, client_id: int, phone_number: str, ttl_hours: int = 48) -> "ConversationSession":
     """Load existing session or create a fresh one. Returns the session row."""
+    phone_h = hmac_phone_hash(phone_number)
     result = await session.execute(
         select(ConversationSession).where(
             ConversationSession.client_id == client_id,
-            ConversationSession.phone_number == phone_number,
+            ConversationSession.phone_hash == phone_h,
             ConversationSession.is_human_takeover == False,
         ).order_by(ConversationSession.last_activity_at.desc()).limit(1)
     )
     conv_session = result.scalar_one_or_none()
     if not conv_session:
-        conv_session = ConversationSession(client_id=client_id, phone_number=phone_number)
+        conv_session = ConversationSession(client_id=client_id, phone_number=phone_number, phone_hash=phone_h)
         session.add(conv_session)
         await session.flush()
         return conv_session
@@ -425,15 +634,16 @@ async def get_or_create_session(session, client_id: int, phone_number: str, ttl_
 
 async def update_session_after_message(session, client_id: int, phone_number: str, user_message: str, bot_message: str, intent: str, entities: dict, slot_data: dict, new_state: str):
     """Append a turn to the conversation session."""
+    phone_h = hmac_phone_hash(phone_number)
     result = await session.execute(
         select(ConversationSession).where(
             ConversationSession.client_id == client_id,
-            ConversationSession.phone_number == phone_number,
+            ConversationSession.phone_hash == phone_h,
         ).order_by(ConversationSession.last_activity_at.desc()).limit(1)
     )
     conv_session = result.scalar_one_or_none()
     if not conv_session:
-        conv_session = ConversationSession(client_id=client_id, phone_number=phone_number)
+        conv_session = ConversationSession(client_id=client_id, phone_number=phone_number, phone_hash=phone_h)
         session.add(conv_session)
 
     conv_session.last_user_message = user_message
@@ -452,9 +662,49 @@ async def update_session_after_message(session, client_id: int, phone_number: st
 
 # -- Booking helpers for web chat widget --
 
+def booking_idempotency_key(client_id: int, business_id: str, extracted: dict) -> str:
+    """Deterministic idempotency key for a booking request.
+
+    Built from the customer + slot + service so a duplicate retry of the same
+    booking (e.g. a WhatsApp/web retry of an identical message) deduplicates.
+    """
+    import hashlib
+    fingerprint = {
+        "client_id": client_id,
+        "business_id": business_id,
+        "customer_contact": (extracted or {}).get("customer_contact"),
+        "date": (extracted or {}).get("date"),
+        "time": (extracted or {}).get("time"),
+        "service_type": (extracted or {}).get("service_type"),
+        "intent": (extracted or {}).get("intent", "booking_request"),
+    }
+    raw = json.dumps(fingerprint, sort_keys=True, default=str)
+    return "bk_" + hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+
 async def create_booking(session, client_id: int, business_id: str, business_type: str,
-                         extracted: dict, source: str = "web_chat") -> "Booking":
-    """Create a booking row from LLM-extracted fields."""
+                         extracted: dict, source: str = "web_chat",
+                         conversation_id: Optional[str] = None) -> "Booking":
+    """Create a booking row from LLM-extracted fields.
+
+    Idempotent: retries carrying the same conversation_id (or the same
+    customer + slot + service fingerprint) reuse the existing row instead of
+    inserting a duplicate.
+    """
+    conv_id = conversation_id or booking_idempotency_key(client_id, business_id, extracted)
+
+    # Idempotency check — dedup retries of the same booking.
+    existing = await session.execute(
+        select(Booking).where(
+            Booking.conversation_id == conv_id,
+            Booking.client_id == client_id,
+        ).limit(1)
+    )
+    found = existing.scalar_one_or_none()
+    if found is not None:
+        logger.info("[i] Reusing existing booking id=%s for conversation_id=%s", found.id, conv_id)
+        return found
+
     booking = Booking(
         client_id=client_id,
         business_id=business_id,
@@ -469,6 +719,7 @@ async def create_booking(session, client_id: int, business_id: str, business_typ
         notes=extracted.get("notes"),
         raw_extracted=extracted,
         source=source,
+        conversation_id=conv_id,
     )
     session.add(booking)
     await session.commit()
@@ -517,6 +768,8 @@ async def create_indexes():
     """Create indexes on hot-read columns for messages, appointments, bookings, conversation_sessions."""
     from sqlalchemy import text
     index_statements = [
+        "ALTER TABLE bookings ADD COLUMN conversation_id VARCHAR(255)",
+        "CREATE INDEX IF NOT EXISTS idx_bookings_conversation_id ON bookings (conversation_id)",
         "CREATE INDEX IF NOT EXISTS idx_messages_phone_number ON messages (phone_number)",
         "CREATE INDEX IF NOT EXISTS idx_messages_client_id ON messages (client_id)",
         "CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversation_id)",

@@ -51,15 +51,12 @@ async def send_push_notification(title: str, body: str, phone_number: str = ""):
 
 
 async def send_whatsapp_message(phone_number: str, text: str):
-    """Send message to WhatsApp via bridge"""
-    async with httpx.AsyncClient() as client:
-        try:
-            await client.post("http://localhost:3001/send", json={
-                "to": phone_number,
-                "message": text
-            }, timeout=5.0)
-        except httpx.ConnectError:
-            pass  # Bridge not running
+    """Send message to WhatsApp via the anti-ban limiter (cap + cooldown + delay)."""
+    try:
+        from outbound_limiter import send_whatsapp
+        await send_whatsapp(phone_number, text)
+    except Exception:
+        pass  # Bridge not running / rate limited
 
 
 async def handle_telegram_webhook(update: dict):

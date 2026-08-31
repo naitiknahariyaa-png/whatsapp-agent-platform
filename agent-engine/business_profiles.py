@@ -11,6 +11,13 @@ from enum import Enum
 
 logger = logging.getLogger("business_profiles")
 
+from cache import (
+    catalog_key,
+    cache,
+    profile_key,
+    stats_key,
+)
+
 
 class BusinessType(Enum):
     RESTAURANT = "restaurant"
@@ -342,11 +349,22 @@ class BusinessManager:
     def create_profile(self, profile: BusinessProfile) -> BusinessProfile:
         self.profiles[profile.id] = profile
         self._save()
+        # Write-through + explicit invalidation of any stale derived entries
+        cache.set(profile_key(profile.id), profile.to_dict())
+        cache.invalidate_prefix(f"catalog:{profile.id}:*")
         logger.info(f"[+] Business created: {profile.name} ({profile.business_type.value})")
         return profile
 
     def get_profile(self, business_id: str) -> Optional[BusinessProfile]:
-        return self.profiles.get(business_id)
+        if business_id not in self.profiles:
+            return None
+        cached = cache.get(profile_key(business_id))
+        if cached is not None:
+            return self.profiles[business_id]  # authoritative in-memory copy
+        result = self.profiles.get(business_id)
+        if result is not None:
+            cache.set(profile_key(business_id), result.to_dict())
+        return result
 
     def update_profile(self, business_id: str, **kwargs) -> Optional[BusinessProfile]:
         profile = self.profiles.get(business_id)
@@ -357,6 +375,9 @@ class BusinessManager:
                 setattr(profile, key, value)
         profile.updated_at = datetime.utcnow().isoformat()
         self._save()
+        # Explicit invalidation — never serve a stale profile or stale
+        # derived catalog listings after a mutation.
+        cache.invalidate_business(business_id)
         return profile
 
     def add_catalog_item(self, business_id: str, item: CatalogItem) -> CatalogItem:
@@ -364,14 +385,22 @@ class BusinessManager:
             self.catalogs[business_id] = []
         self.catalogs[business_id].append(item)
         self._save()
+        # Drop every cached listing (any category) for this business
+        cache.invalidate_prefix(f"catalog:{business_id}:*")
         logger.info(f"[+] Catalog item added: {item.name} for {business_id}")
         return item
 
     def get_catalog(self, business_id: str, category: str = "") -> List[Dict]:
+        key = catalog_key(business_id, category)
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
         items = self.catalogs.get(business_id, [])
         if category:
             items = [i for i in items if i.category == category]
-        return [i.to_dict() for i in items]
+        result = [i.to_dict() for i in items]
+        cache.set(key, result)
+        return result
 
     def get_categories(self, business_id: str) -> List[str]:
         items = self.catalogs.get(business_id, [])
@@ -382,6 +411,8 @@ class BusinessManager:
             self.orders[business_id] = []
         self.orders[business_id].append(order)
         self._save()
+        # Stats are derived from orders — drop the cached report
+        cache.delete(stats_key(business_id))
         logger.info(f"[+] Order created: {order.id} for {business_id}")
         return order
 
@@ -398,18 +429,25 @@ class BusinessManager:
                 order.status = status
                 order.updated_at = datetime.utcnow().isoformat()
                 self._save()
+                cache.delete(stats_key(business_id))
                 return True
         return False
 
     def get_business_stats(self, business_id: str) -> Dict:
+        key = stats_key(business_id)
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
         orders = self.orders.get(business_id, [])
-        return {
+        result = {
             "total_orders": len(orders),
             "pending": sum(1 for o in orders if o.status == "pending"),
             "completed": sum(1 for o in orders if o.status == "delivered"),
             "revenue": sum(o.total for o in orders if o.payment_status == "paid"),
             "avg_order_value": round(sum(o.total for o in orders) / max(len(orders), 1), 1),
         }
+        cache.set(key, result)
+        return result
 
 
 # Global manager

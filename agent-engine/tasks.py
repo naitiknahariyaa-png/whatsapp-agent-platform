@@ -3,7 +3,7 @@ Redis task queue for background jobs (broadcasts, reminders)
 """
 import redis
 import json
-from typing import Callable, Any
+from typing import Callable, Any, Dict
 import os
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")

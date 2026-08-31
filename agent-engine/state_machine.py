@@ -199,7 +199,7 @@ class DBStateMachine:
         self.ttl_hours = ttl_hours
 
     async def _get_session(self, client_id: int, phone_number: str):
-        from db import get_or_create_session
+        from db import get_or_create_session, get_session
         async for session in get_session():
             return await get_or_create_session(session, client_id, phone_number, ttl_hours=self.ttl_hours)
 
@@ -300,7 +300,8 @@ class DBStateMachine:
 
     async def reset(self, client_id: int, phone_number: str):
         try:
-            from db import async_session
+            from db import async_session, ConversationSession
+            from sqlalchemy import select
             async with async_session() as session:
                 result = await session.execute(
                     select(ConversationSession).where(

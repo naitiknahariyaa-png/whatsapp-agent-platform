@@ -508,7 +508,14 @@ def show_chat_menu():
     hr()
 
     phone = input("Customer phone: ").strip() or "919876543210"
-    client_id = int(input("Client ID: ").strip() or "1")
+    client_raw = input("Client ID: ").strip() or "1"
+    try:
+        client_id = int(client_raw)
+    except ValueError:
+        # Accept string aliases instead of crashing on non-numeric input.
+        alias_map = {"UI": 1, "ADMIN": 99, "CLI": 1}
+        client_id = alias_map.get(client_raw.strip().upper(), 1)
+        info(f"'{client_raw}' mapped to client_id={client_id}")
 
     print(f"\nType messages and see AI responses. Type 'quit' to exit.\n")
 
@@ -824,6 +831,8 @@ def main_menu():
         print(f"  {C.CYAN}7{C.RESET}. LLM Settings")
         print(f"  {C.CYAN}8{C.RESET}. Send Message")
         print(f"  {C.CYAN}9{C.RESET}. Diagnostics")
+        print(f"  {C.CYAN}A{C.RESET}. Ops & Jobs (reports/alerts/approvals)")
+        print(f"  {C.CYAN}B{C.RESET}. Business Setup (profile + menu form)")
         print(f"  {C.CYAN}0{C.RESET}. Exit")
         hr()
 
@@ -847,10 +856,128 @@ def main_menu():
             show_send_menu()
         elif choice == "9":
             show_diagnostics()
+        elif choice.lower() == "a":
+            show_ops_menu()
+        elif choice.lower() == "b":
+            show_business_setup_menu()
         elif choice == "0":
             cprint("\nGoodbye! 👋", C.GREEN)
             sys.exit(0)
 
+
+def show_business_setup_menu():
+    """Business Setup — guided form so the AI answers with real business facts."""
+    sys.path.insert(0, str(ROOT))
+    import cli_commands as cc
+
+    while True:
+        banner("BUSINESS SETUP")
+        hr()
+        print(f"  {C.CYAN}1{C.RESET}. Fill / Update Business Profile + Menu (guided form)")
+        print(f"  {C.CYAN}2{C.RESET}. View Current Business Profile & Catalog")
+        print(f"  {C.CYAN}0{C.RESET}. Back")
+        hr()
+        choice = input(f"{C.BOLD}Select: {C.RESET}").strip().lower()
+
+        token = cc.get_token()
+        if choice != "0" and not token:
+            warn("No auth token. Set WAP_TOKEN or WAP_EMAIL + WAP_PASSWORD in .env")
+            return
+
+        try:
+            if choice == "1":
+                cc.business_setup_interactive(token)
+            elif choice == "2":
+                ok, data = cc.get_my_business(token)
+                if ok:
+                    biz = (data or {}).get("business") or {}
+                    print(f"\n  Name      : {biz.get('name', '-')}")
+                    print(f"  Type      : {biz.get('business_type', '-')}")
+                    print(f"  Phone     : {biz.get('contact_phone', '-')}")
+                    print(f"  Address   : {biz.get('address', '-')}")
+                    print(f"  Hours     : {(biz.get('working_hours') or {}).get('summary', '-')}")
+                    print(f"  Welcome   : {biz.get('welcome_message', '-')}")
+                    items = (data or {}).get("catalog") or []
+                    print(f"  Catalog   : {len(items)} item(s)")
+                    for it in items[:20]:
+                        print(f"    - {it.get('name')}  ₹{it.get('price')}  [{it.get('category')}]")
+                else:
+                    error(str(data))
+            elif choice == "0":
+                return
+            else:
+                continue
+        except Exception as e:
+            error(str(e))
+        input("\nPress Enter to continue...")
+
+
+def show_ops_menu():
+    """Ops & Jobs — weekly report, re-engagement, alerts, approvals.
+
+    Reuses cli_commands (HTTP-only) so the terminal, the UI and any scripts
+    all drive the exact same API endpoints.
+    """
+    sys.path.insert(0, str(ROOT))
+    import cli_commands as cc
+
+    while True:
+        banner("OPS & JOBS")
+        hr()
+        print(f"  {C.CYAN}1{C.RESET}. Generate Weekly Report")
+        print(f"  {C.CYAN}2{C.RESET}. Run Re-engagement Now")
+        print(f"  {C.CYAN}3{C.RESET}. Stop Re-engagement (lead)")
+        print(f"  {C.CYAN}4{C.RESET}. List Alerts")
+        print(f"  {C.CYAN}5{C.RESET}. Trigger Alerts Now")
+        print(f"  {C.CYAN}6{C.RESET}. Create Approval Request")
+        print(f"  {C.CYAN}7{C.RESET}. Pending Approvals")
+        print(f"  {C.CYAN}8{C.RESET}. Decide Approval")
+        print(f"  {C.CYAN}0{C.RESET}. Back")
+        hr()
+        choice = input(f"{C.BOLD}Select: {C.RESET}").strip().lower()
+
+        token = cc.get_token()
+        if choice != "0" and not token:
+            warn("No auth token. Set WAP_TOKEN or WAP_EMAIL + WAP_PASSWORD in .env")
+            return
+
+        try:
+            if choice == "1":
+                ok, data = cc.cmd_generate_report(1, token)
+            elif choice == "2":
+                ok, data = cc.cmd_run_reengage(token)
+            elif choice == "3":
+                lead = input("Lead ID: ").strip()
+                reason = input("Reason (converted/opted_out) [converted]: ").strip() or "converted"
+                ok, data = cc.cmd_stop_reengage(int(lead), reason, token)
+            elif choice == "4":
+                ok, data = cc.cmd_list_alerts(token)
+            elif choice == "5":
+                ok, data = cc.cmd_trigger_alerts(token)
+            elif choice == "6":
+                action = input("Action type (refund/invoice/...): ").strip()
+                amount = input("Amount (blank to skip): ").strip()
+                ok, data = cc.cmd_approval_request(
+                    action, float(amount) if amount else None, None, None, token)
+            elif choice == "7":
+                ok, data = cc.cmd_pending_approvals(token)
+            elif choice == "8":
+                rid = input("Request ID: ").strip()
+                d = input("Approve? (y/n): ").strip().lower()
+                ok, data = cc.cmd_approval_decision(rid, d == "y", "", token)
+            elif choice == "0":
+                return
+            else:
+                continue
+
+            if ok:
+                success("Done")
+                _pp = json.dumps(data, indent=2, default=str) if isinstance(data, (dict, list)) else str(data)
+                print(_pp[:2000])
+            else:
+                error(str(data))
+        except Exception as e:
+            error(str(e))
         input("\nPress Enter to continue...")
 
 

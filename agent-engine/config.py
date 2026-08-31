@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     model_config = ConfigDict(env_file=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
     groq_api_key: str = ""
-    llm_model: str = "llama-3.3-70b-versatile"
+    llm_model: str = "qwen/qwen3.8-27b"
     llm_provider: str = "groq"
     ollama_base_url: str = "http://localhost:11434"
     openai_api_key: str = ""

@@ -1,286 +1,209 @@
-# WhatsApp Agent Platform — Terminal Edition
+# WhatsApp AI Agent Company — Full Platform
 
-> **No website. Pure terminal. Full power.**
+> A multi-tenant, production-grade AI company that runs entirely over WhatsApp.
 
-A fully functional WhatsApp AI agent platform that runs entirely in your terminal. Manage leads, appointments, drip campaigns, and WhatsApp conversations — all from a beautiful command-line interface.
+## Architecture Overview
 
----
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        ANDROID CONTROL CENTER                        │
+│                   (Thin client — no AI logic here)                   │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+┌───────────────────────────────▼─────────────────────────────────────┐
+│                     FASTAPI BACKEND (agent-engine)                   │
+│  ┌─────────────┐  ┌──────────────┐  ┌───────────────────────────┐   │
+│  │   Manager   │  │   Workers    │  │   Constraint Engine        │   │
+│  │   Agent     │  │  (11 agents) │  │   (Hinglish/multi-lang)    │   │
+│  └─────────────┘  └──────────────┘  └───────────────────────────┘   │
+│                                                                       │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │              Onboarding Wizard + Encrypted Vault             │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+└───────────────┬─────────────────────────────┬───────────────────────┘
+                │                             │
+    ┌───────────▼───────────┐     ┌───────────▼───────────┐
+    │   POSTGRES + ALEMBIC  │     │   REDIS + CHROMADB    │
+    │   (tenant-scoped DB)  │     │   (cache + vector DB) │
+    └───────────────────────┘     └───────────────────────┘
+                │
+    ┌───────────▼───────────┐
+    │  WHATSAPP BRIDGE      │
+    │  (Node.js + Puppeteer)│
+    │  HMAC-signed webhooks │
+    └───────────────────────┘
+```
 
-## What This Is
+## Build Status by Part
 
-This is a **local, terminal-only** version of the WhatsApp Agent Platform. The web frontend has been removed. Everything runs via:
+| Part | Component | Status |
+|------|-----------|--------|
+| **A** | PostgreSQL + Redis + ChromaDB + Prometheus + Grafana | ✅ Docker Compose ready |
+| **A** | Alembic migrations (initial + owner onboarding) | ✅ Migrations present |
+| **A** | Outbound anti-ban queue (Redis-backed, 5-20s delay) | ✅ `outbound_limiter.py` |
+| **A** | HMAC-signed bridge webhooks + timestamp validation | ✅ `security.py` |
+| **A** | Secrets manager (Fernet encryption) | ✅ `secrets_manager.py` |
+| **A** | ARQ durable task queue | ✅ `task_manager.py` |
+| **B** | Owner/Client/CatalogItem/Policy/OwnerApiKey models | ✅ DB + Alembic migration |
+| **B** | Onboarding wizard (7-step) | ✅ `services/onboarding.py` |
+| **B** | Encrypted API key vault | ✅ `OwnerApiKey` + `secrets.encrypt()` |
+| **B** | Test conversation simulator | ✅ `run_test_conversation()` |
+| **B** | FastAPI onboarding routes | ✅ 5 routes in `main.py` |
+| **C** | BaseAgent (ReAct loop) | ✅ `agents/base.py` |
+| **C** | Context Loader (tight context, no bloat) | ✅ `ContextLoader` |
+| **C** | Planner (structured JSON output) | ✅ `Planner` with confidence thresholds |
+| **C** | Router/Delegator (deterministic, 15s timeout) | ✅ `Router` |
+| **C** | Verifier (conditional LLM check) | ✅ `Verifier` |
+| **C** | Response Composer (WhatsApp-safe split) | ✅ `ResponseComposer` |
+| **C** | Error/fallback chain | ✅ Retry → escalation, never silent drop |
+| **D** | Escalation Agent | ✅ `agents/escalation.py` |
+| **D** | Support Agent (RAG) | ✅ `agents/support.py` |
+| **D** | Sales Agent | ✅ `agents/sales.py` |
+| **D** | Scheduling Agent | ✅ `agents/concierge.py` |
+| **D** | Billing Agent | ✅ `agents/billing.py` |
+| **D** | QA Agent | ✅ `agents/qa_agent.py` |
+| **D** | Analytics Agent | ✅ `agents/analytics.py` (reporting.py) |
+| **D** | Marketing Agent | ✅ `agents/marketing.py` |
+| **D** | Content Agent | ✅ `agents/content.py` |
+| **D** | Onboarding Agent | ✅ `agents/onboarding_agent.py` |
+| **D** | Retention Agent | ✅ `agents/retention.py` |
+| **D** | HR Agent | ✅ `agents/hr.py` |
+| **D** | Legal Agent | ✅ `agents/legal.py` |
+| **D** | DevOps Agent | ✅ `agents/devops.py` |
+| **E** | Language/tone detection (Hinglish) | ✅ `detect_language_and_tone()` |
+| **E** | Constraint extraction (LLM + keyword fallback) | ✅ `extract_constraints()` |
+| **E** | Catalog filtering + ranking | ✅ `apply_catalog_filters()` + `rank_catalog_items()` |
+| **E** | Fallback constraint relaxation | ✅ `find_relaxable_constraint()` |
+| **E** | Tone-mirrored response composition | ✅ `compose_reply()` with 3 language templates |
+| **E** | Complaint detection → escalation | ✅ `detect_complaint()` |
+| **E** | Negotiation bounds checker | ✅ `check_negotiation_bounds()` |
+| **E** | 22-example Hinglish eval set | ✅ `test_constraint_extraction_eval.py` |
+| **F** | Lead Nurture Loop (4-stage) | ✅ `lead_funnel.py` |
+| **F** | Appointment Guard Loop | ✅ `appointment_nurture.py` |
+| **F** | Re-engagement Loop (30-day scan) | ✅ `reengagement_loop.py` |
+| **F** | Weekly CEO Report + Quality Audit | ✅ `weekly_report.py` |
+| **G** | Messaging/anti-ban guards | ✅ `utils/messaging.py` |
+| **G** | Reliability wrappers | ✅ `utils/reliability.py` |
+| **G** | Memory helpers | ✅ `utils/memory.py` |
+| **G** | RAG helpers | ✅ `utils/rag.py` |
+| **G** | Security utilities | ✅ `utils/security.py` |
+| **G** | Analytics | ✅ `utils/analytics.py` |
+| **G** | Integrations (Whisper, Vision, Translate) | ✅ `utils/integrations.py` |
+| **H** | Android App (thin client) | ✅ `android-app/` scaffolded |
+| **H** | Foreground WebSocket Service | ✅ `WebSocketService.kt` |
+| **H** | WorkManager periodic sync | ✅ `SyncWorker.kt` |
+| **H** | REST API layer | ✅ `AgentApiService.kt` |
+| **H** | Repository + encrypted TokenManager | ✅ `AgentRepository.kt` |
+| **H** | Dashboard + Live Chat + Leads screens | ✅ Layout XMLs |
+| **I** | Docker Compose (full stack) | ✅ `docker-compose.yml` |
+| **I** | Staging environment | ✅ `backend_staging` + `bridge_staging` |
+| **I** | Observability (Prometheus + Grafana + Alertmanager) | ✅ In Compose |
+| **I** | Structured logging with trace_id | ✅ `logging_setup.py` |
 
-- **`wap-cli.py`** — Terminal control panel (the only UI you need)
-- **Backend API** — FastAPI server running in the background
-- **WhatsApp Bridge** — Node.js process for WhatsApp Web connectivity
+## Quick Start
 
----
+```bash
+# 1. Clone and enter
+git clone <repo-url>
+cd whatsapp-agent-platform
 
-## Prerequisites
+# 2. Start infrastructure
+docker-compose up -d postgres redis chromadb
 
-| Tool | Version | Why |
-|------|---------|-----|
-| Python | 3.10+ | Backend API + CLI |
-| Node.js | 20.x+ | WhatsApp Web bridge |
-| Chrome/Edge | Any | WhatsApp Web automation |
-| Groq API Key | Free tier ok | AI responses (or use Ollama locally) |
-
----
-
-## Quick Start (Windows)
-
-### 1. Install Python Dependencies
-
-```powershell
+# 3. Install Python deps
 cd agent-engine
 pip install -r requirements.txt
-```
 
-### 2. Install Bridge Dependencies
+# 4. Run migrations
+alembic upgrade head
 
-```powershell
+# 5. Start backend
+uvicorn main:app --reload --port 8000
+
+# 6. Start WhatsApp bridge (in another terminal)
 cd whatsapp-bridge
 npm install
-cd ..
+npm start
+
+# 7. (Optional) Start Android app
+cd android-app
+./gradlew assembleDebug
 ```
-
-### 3. Configure Environment
-
-```powershell
-cd agent-engine
-copy .env.example .env
-notepad .env
-```
-
-**Required fields in `.env`:**
-- `GROQ_API_KEY` — Get free key at https://console.groq.com
-- `WA_BRIDGE_SECRET` — Keep default or set your own
-- `TELEGRAM_BOT_TOKEN` — Optional, from @BotFather
-
-### 4. Launch Terminal App
-
-```powershell
-python wap-cli.py
-```
-
-Or double-click `start-terminal.bat`.
-
----
-
-## Terminal Menu Guide
-
-When you run `wap-cli.py`, you get this menu:
-
-```
-1. Dashboard          — System overview, stats, connection status
-2. WhatsApp Bridge    — Start/stop bridge, scan QR, send messages
-3. Chat Simulator     — Test AI conversations locally in terminal
-4. Lead CRM           — Create leads, update status, view pipeline
-5. Appointments       — Book appointments, view schedule
-6. Drip Campaigns     — Create campaigns, enroll contacts
-7. LLM Settings       — Check AI provider status
-8. Send Message       — Send WhatsApp message to any number
-9. Diagnostics        — System health check
-0. Exit
-```
-
----
-
-## How Each Feature Works
-
-### Dashboard
-Shows real-time status of:
-- Backend API server
-- WhatsApp bridge connection
-- LLM provider (Groq / Ollama / Mock)
-- Database stats (leads, appointments, campaigns)
-
-### WhatsApp Bridge
-The bridge connects to WhatsApp Web via Chrome. Steps:
-1. Select **"Start Bridge"**
-2. A QR code appears in terminal — scan with WhatsApp app
-3. Once connected, you can send/receive messages
-
-**Note:** Keep the terminal open while the bridge is running.
-
-### Chat Simulator
-Test your AI assistant without sending real WhatsApp messages:
-- Enter a customer phone number
-- Type messages and see AI responses in real-time
-- The AI uses your configured LLM (Groq by default)
-
-### Lead CRM
-Manage your sales pipeline:
-- **Create Lead**: Add phone, name, source
-- **Update Status**: Move leads through new → qualified → contacted → converted/lost
-- **View Detail**: See full lead profile and score
-
-Lead scoring is automatic based on:
-- Name provided: +20 points
-- Location provided: +20 points
-- Budget provided: +30 points
-- Requirement provided: +30 points
-
-### Appointments
-Schedule and manage appointments:
-- Create appointments with date/time
-- The system automatically sends reminders 1 hour before
-- View all appointments or filter by date
-
-### Drip Campaigns
-Automated message sequences:
-- **Create Campaign**: Name and description
-- **Enroll Contact**: Add a phone/contact to a campaign
-- **View Stats**: See enrollment counts
-
-Campaigns run automatically in the background.
-
-### LLM Settings
-Shows which AI provider is active:
-- **Groq** (cloud, fast) — default
-- **Ollama** (local, private) — requires `ollama serve`
-- **OpenAI** (optional fallback)
-- **MockLLM** (last resort, keyword-based)
-
-### Send Message
-Send a WhatsApp message directly from terminal:
-- Enter recipient phone (with country code, e.g., `919876543210`)
-- Type your message
-- Sent via the WhatsApp bridge
-
----
-
-## Project Structure
-
-```
-whatsapp-agent-platform/
-├── agent-engine/          # Python backend (FastAPI + AI + DB)
-│   ├── main.py            # API server (terminal mode supported)
-│   ├── orchestrator.py    # AI message processing
-│   ├── lead_gen.py        # Lead CRM models & logic
-│   ├── db.py              # SQLAlchemy database models
-│   ├── llm_setup.py       # Multi-provider LLM setup
-│   ├── scheduler.py       # Background reminders + campaigns
-│   ├── whatsapp_connector.py  # Bridge lifecycle
-│   └── .env               # Your API keys (gitignored)
-├── whatsapp-bridge/       # Node.js WhatsApp Web bridge
-│   ├── bridge.js          # Main bridge server
-│   ├── package.json       # Dependencies
-│   └── .wwebjs_auth/      # WhatsApp session (gitignored)
-├── services/              # Business logic modules
-│   ├── drip_campaigns.py  # Campaign engine
-│   ├── lead_scoring.py    # Lead scoring algorithm
-│   └── ...
-├── wap-cli.py             # ★ TERMINAL CONTROL PANEL
-├── run-backend.py         # Backend launcher (no frontend)
-└── start-terminal.bat     # Windows launcher
-```
-
----
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GROQ_API_KEY` | (empty) | Groq LLM API key |
-| `LLM_PROVIDER` | `groq` | AI provider: groq/ollama/openai/mock |
-| `LLM_MODEL` | `llama-3.3-70b-versatile` | Model name |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
-| `DATABASE_URL` | `sqlite+aiosqlite:///./wap_data.db` | Database |
-| `WHATSAPP_BRIDGE_URL` | `http://localhost:3001` | Bridge URL |
-| `PORT` | `8000` | Backend API port |
-| `BRIDGE_HTTP_PORT` | `3001` | Bridge HTTP port |
-| `WAP_TERMINAL_MODE` | `1` | Disable frontend (set by run-backend.py) |
+```bash
+# Database
+DATABASE_URL=postgresql+asyncpg://wap_user:wap_pass@localhost:5432/whatsapp_agent
 
----
+# Redis
+REDIS_URL=redis://localhost:6379/0
 
-## Troubleshooting
+# LLM
+GROQ_API_KEY=gsk_...
+LLM_PROVIDER=groq
+LLM_MODEL=llama-3.3-70b-versatile
 
-### Backend won't start
-- Check if port 8000 is already in use: `netstat -ano | findstr :8000`
-- Make sure Python dependencies are installed: `pip install -r agent-engine/requirements.txt`
+# Security
+JWT_SECRET_KEY=your-secret-key-here
+WA_BRIDGE_SECRET=wap_bridge_secret_2026
 
-### Bridge won't start
-- Make sure Node.js 20+ is installed: `node --version`
-- Install deps: `cd whatsapp-bridge && npm install`
-- Make sure Chrome or Edge is installed
-- Check bridge logs in terminal output
+# WhatsApp
+META_ACCESS_TOKEN=...
+META_PHONE_NUMBER_ID=...
+META_VERIFY_TOKEN=...
 
-### "No such table: leads"
-- Restart the backend — it creates tables on startup
-- Or manually run: `python -c "import asyncio; from db import init_db; asyncio.run(init_db())"`
-
-### LLM returns mock responses
-- Check `GROQ_API_KEY` in `.env`
-- Verify at: `http://localhost:8000/api/llm/status`
-- Or switch to Ollama: set `LLM_PROVIDER=ollama` and run `ollama serve`
-
-### QR code doesn't appear
-- Make sure bridge is started: look for `[Bridge] Connected` or `[Bridge] Authenticated` in output
-- Try refreshing QR from Bridge menu
-- Check that WhatsApp Web is not already logged in elsewhere
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                   TERMINAL (wap-cli.py)                  │
-│  Dashboard | Bridge | Chat | Leads | Appts | Campaigns   │
-└───────────────────────┬─────────────────────────────────┘
-                        │ imports / HTTP
-                        ▼
-┌─────────────────────────────────────────────────────────┐
-│              BACKEND API (FastAPI :8000)                 │
-│  Routes: /api/message, /api/crm, /api/appointments...   │
-│  Orchestrator → LLM → DB → Bridge forwarder             │
-└───────────────────────┬─────────────────────────────────┘
-                        │ webhook
-                        ▼
-┌─────────────────────────────────────────────────────────┐
-│         WHATSAPP BRIDGE (Node.js :3001)                  │
-│  whatsapp-web.js → Chrome → WhatsApp Web                 │
-│  QR / Status / Send / Receive                            │
-└─────────────────────────────────────────────────────────┘
+# Payments
+RAZORPAY_KEY_ID=...
+RAZORPAY_KEY_SECRET=...
 ```
 
----
+## Key Design Decisions
 
-## Security Notes
+1. **Multi-tenancy**: Every table, cache key, and vector embedding carries `owner_id`. Cross-tenant isolation is enforced at the query layer and verified by automated tests.
 
-- `.env` contains API keys — never commit it
-- `.wwebjs_auth/` contains WhatsApp session — never commit it
-- JWT tokens expire after 24 hours
-- Backend binds to `127.0.0.1` in terminal mode (not exposed externally)
+2. **No silent failures**: Every failure path in the Manager Agent resolves to retry-with-feedback or human escalation. Never a raw error to the customer.
 
----
+3. **Anti-ban by default**: All outbound messaging goes through a Redis-backed queue with randomized 5-20s delays, daily caps, and per-recipient cooldowns.
 
-## What's Alive vs What's Not
+4. **Constraint-aware replies**: The engine extracts budget, urgency, dietary flags, and time constraints from messy mixed-language input, then filters the owner's actual catalog — never a full menu dump.
 
-| Feature | Status |
-|---------|--------|
-| WhatsApp Bridge | ✅ Working (QR scan required) |
-| AI Chat (Groq) | ✅ Working (key pre-configured) |
-| AI Chat (Ollama) | ✅ Working (if Ollama running) |
-| Lead CRM | ✅ Working |
-| Appointments | ✅ Working |
-| Drip Campaigns | ✅ Working |
-| Telegram Bridge | ✅ Configured (token in .env) |
-| Payments (Razorpay) | ⚠️ Configured but keys are placeholders |
-| Frontend | ❌ Disabled (terminal only) |
-| ChromaDB / Vector Store | ⚠️ Code exists, not wired in CLI |
+5. **Small functions, reused everywhere**: 55+ granular utilities (`utils/`) for messaging, security, analytics, scheduling, payments — built once, called everywhere.
 
----
+## Testing
 
-## Next Steps
+```bash
+# Run all tests
+cd agent-engine
+pytest tests/
 
-1. **Scan WhatsApp QR** — Start bridge and connect your phone
-2. **Test AI Chat** — Use Chat Simulator to verify responses
-3. **Create First Lead** — Add a test lead in Lead CRM
-4. **Book Appointment** — Schedule a test appointment
-5. **Start Campaign** — Create a drip campaign for onboarding
+# Run tenant isolation tests specifically
+pytest tests/test_tenant_isolation.py -v
 
----
+# Run constraint extraction eval set
+pytest tests/test_constraint_extraction_eval.py -v
+```
 
-*Built with FastAPI, SQLAlchemy, whatsapp-web.js, and Groq LLM.*
+## License
+
+Proprietary — WhatsApp Agent Platform
+
+## Ops CLI
+
+```bash
+# Auth (one of):
+export WAP_TOKEN=<jwt>            # or WAP_EMAIL + WAP_PASSWORD for auto-login
+
+python cli.py start-server                          # boot the backend
+python cli.py generate-report --client-id 1         # weekly CEO report
+python cli.py run-reengage                          # one re-engagement scan
+python cli.py stop-reengage --lead-id 12            # stop nudges for a lead
+python cli.py list-alerts                           # evaluate alerts
+python cli.py trigger-alerts                        # run + dispatch alerts
+python cli.py approval-request --action refund --amount 5000
+python cli.py approval-pending
+python cli.py approval-decision --id <request-id> --approve
+```
+
+All commands call the same FastAPI endpoints the UI uses (HTTP only, no direct DB access).
+The interactive `wap-cli.py` exposes the same operations under menu **A. Ops & Jobs**.

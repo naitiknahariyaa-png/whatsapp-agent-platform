@@ -98,7 +98,7 @@ async def _create_appointment(phone_number: str, date: str, time: str, title: st
                 appointment_date=date,
                 appointment_time=time,
                 title=title,
-                duration_minutes=duration_minutes if 'duration_minutes' in dir() else 30,
+                duration_minutes=30,
                 status="scheduled",
             )
             session.add(appt)

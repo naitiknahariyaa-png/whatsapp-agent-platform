@@ -4,6 +4,7 @@ Phase 4: AI Power-Ups — Voice, Vision, Language, Sentiment, Knowledge Base
 import json
 import logging
 import os
+import re
 import tempfile
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime

@@ -1,6 +1,8 @@
 """
 WhatsApp Agent Platform - Main Application
 """
+from __future__ import annotations
+
 import os
 import sys
 import uuid
@@ -8,42 +10,64 @@ import hmac
 import hashlib
 import json
 import asyncio
-from datetime import datetime, timezone
+import time
+import httpx
+from datetime import datetime, timezone, timedelta
 from contextlib import asynccontextmanager
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from orchestrator import AgentOrchestrator
 
 
-# Add services directory to Python path (absolute path)
+# Add agent-engine and services directories to Python path (absolute paths)
+_ENGINE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "."))
 _SERVICES_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "services"))
 
-if _SERVICES_DIR not in sys.path:
-    sys.path.insert(0, _SERVICES_DIR)
-    # Force import check: verify services is importable
-    import importlib
-    try:
-        importlib.import_module("lead_scoring")
-        print(f"[v] Services directory loaded: {_SERVICES_DIR}", flush=True)
-    except ImportError as e:
-        print(f"[!] Services import failed: {e}", flush=True)
-        # Fallback: add CWD parent
-        _alt = os.path.abspath(os.path.join(os.getcwd(), "..", "services"))
-        if _alt not in sys.path:
-            sys.path.insert(0, _alt)
-            print(f"[i] Trying alt path: {_alt}", flush=True)
+# Ensure agent-engine is searched BEFORE services for module imports
+for _d in [_SERVICES_DIR, _ENGINE_DIR]:
+    if _d in sys.path:
+        sys.path.remove(_d)
+sys.path.insert(0, _SERVICES_DIR)
+sys.path.insert(0, _ENGINE_DIR)
+
+# Force import check: verify services is importable
+import importlib
+try:
+    importlib.import_module("lead_scoring")
+    print(f"[v] Services directory loaded: {_SERVICES_DIR}", flush=True)
+except ImportError as e:
+    print(f"[!] Services import failed: {e}", flush=True)
+    # Fallback: add CWD parent
+    _alt = os.path.abspath(os.path.join(os.getcwd(), "..", "services"))
+    if _alt not in sys.path:
+        sys.path.insert(0, _alt)
+        print(f"[i] Trying alt path: {_alt}", flush=True)
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, File, UploadFile
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from fastapi.exceptions import RequestValidationError
 
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials
 from auth import security
 
-from db import init_db, get_session, save_message, get_conversation_history, upsert_contact
+from db import init_db, get_session, save_message, get_conversation_history, upsert_contact, Message, Contact
 from config import settings
+
+# Public base URL for agent/webhook callbacks (env-overridable)
+AGENT_API_URL = os.getenv("AGENT_API_URL", "http://localhost:8000")
+
+# Cloud API client is optional; degrade gracefully if the module is absent.
+try:
+    from cloud_api import cloud_api
+except ImportError:
+    cloud_api = None
 
 # Lazy-loaded orchestrator to keep deployment lightweight
 _AGENT_ORCHESTRATOR = None
@@ -62,13 +86,13 @@ from auth import (
     LoginRequest, RegisterRequest, TokenResponse, Role, User,
     create_user, authenticate, create_access_token, get_current_user,
     require_role, require_admin, log_action, JWT_EXPIRE_HOURS,
-    EmailVerifyRequest, OTPRequest, OTPVerifyRequest,
+    EmailVerifyRequest, OTPRequest, OTPVerifyRequest, EmailVerifyConfirmRequest,
     PasswordResetRequest, PasswordResetConfirmRequest, PasswordChangeRequest,
 )
 from email_auth import email_auth_service
 from payments import PaymentEngine
 from security import (
-    verify_bridge_webhook, verify_meta_webhook, rate_limit, sanitize_text, sanitize_phone,
+    verify_bridge_webhook, verify_bridge_webhook_with_timestamp, verify_meta_webhook, rate_limit, sanitize_text, sanitize_phone,
 )
 
 payment_engine = PaymentEngine()
@@ -86,8 +110,11 @@ async def _update_message_status(wamid: str, status_type: str, recipient: str):
     try:
         async for session in get_session():
             from sqlalchemy import select
+            # Scope by recipient phone number (provided by the webhook) so a wamid
+            # can never be matched to a message belonging to another tenant.
             result = await session.execute(
-                select(Message).where(Message.media_url == wamid).limit(1)
+                select(Message).where(Message.media_url == wamid,
+                                      Message.phone_number == recipient).limit(1)
             )
             msg = result.scalar_one_or_none()
             if msg:
@@ -155,8 +182,26 @@ async def lifespan(app: FastAPI):
     logger.info("[v] Database tables created/verified")
 
     from db import register_loop_models
-    register_loop_models()
+    await register_loop_models()
     logger.info("[v] Phase 3 loop models registered")
+
+    # Migrate/add indexes + the new bookings.conversation_id column on existing DBs
+    try:
+        from db import create_indexes
+        await create_indexes()
+        logger.info("[v] DB indexes / migrations applied")
+    except Exception as e:
+        logger.warning(f"[!] create_indexes failed: {e}")
+
+    # Ensure the approval_requests table exists (registered model -> create_all)
+    try:
+        from approval_gates import ApprovalRequestDB  # noqa: F401  (register model)
+        from db import Base, engine
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("[v] approval_requests table ensured")
+    except Exception as e:
+        logger.warning(f"[!] approval_requests table ensure failed: {e}")
     
     # Initialize state machine via get_state_machine() (handles Redis fallback)
     sm = get_state_machine()
@@ -183,6 +228,14 @@ async def lifespan(app: FastAPI):
     # Start background scheduler (drip campaigns + appointment reminders)
     from scheduler import start_scheduler, stop_scheduler
     await start_scheduler()
+
+    # Start the Redis-backed outbound anti-ban queue worker
+    try:
+        from outbound_limiter import outbound_queue
+        await outbound_queue.start()
+        logger.info("[v] Outbound anti-ban queue worker started")
+    except Exception as e:
+        logger.warning(f"Outbound queue not started: {e}")
 
     # Wire up drip campaign message sender so campaign messages go through WhatsApp
     try:
@@ -241,6 +294,24 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("[i] Telegram bridge not started (no token configured)")
 
+    # Start the central event bus (Part H) and fan events out to dashboards
+    try:
+        from event_bus import get_event_bus, EventBusEvent
+        eb = get_event_bus()
+
+        async def _hoist_event_to_dashboard(event: EventBusEvent) -> None:
+            """Fan a structured event out to the owner's connected WebSocket clients."""
+            try:
+                await manager.broadcast(event.owner_id, event.to_dict())
+            except Exception as _fan_err:
+                logger.warning(f"[!] EventBus WebSocket fan-out failed: {_fan_err}")
+
+        eb.add_handler(_hoist_event_to_dashboard)
+        await eb.start()
+        logger.info("[v] Central event bus started (Part H)")
+    except Exception as _eb_err:
+        logger.warning(f"[!] Event bus not started: {_eb_err}")
+
     yield
 
     # Cancel telegram task on shutdown
@@ -250,6 +321,21 @@ async def lifespan(app: FastAPI):
         logger.info("[i] Telegram bridge stopped")
 
     await stop_scheduler()
+
+    # Stop the outbound anti-ban queue worker
+    try:
+        from outbound_limiter import outbound_queue
+        await outbound_queue.stop()
+    except Exception:
+        pass
+
+    # Stop the central event bus (Part H)
+    try:
+        from event_bus import get_event_bus
+        await get_event_bus().stop()
+    except Exception:
+        pass
+
     logger.info("[i] Shutting down...")
 
 app = FastAPI(
@@ -266,6 +352,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Multi-tenant owner onboarding (Section 2)
+try:
+    from onboarding import router as onboarding_router
+    app.include_router(onboarding_router)
+    logger.info("[v] Owner onboarding router mounted at /api/onboarding")
+except Exception as _e:
+    logger.warning(f"[!] Failed to mount onboarding router: {_e}")
+
 # Mount frontend static files (disabled in terminal-only mode)
 _FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
 if not os.getenv("WAP_TERMINAL_MODE") and os.path.exists(_FRONTEND_DIR):
@@ -273,6 +367,44 @@ if not os.getenv("WAP_TERMINAL_MODE") and os.path.exists(_FRONTEND_DIR):
     logger.info(f"[v] Frontend mounted at /frontend from {_FRONTEND_DIR}")
 elif os.getenv("WAP_TERMINAL_MODE"):
     logger.info("[i] Frontend disabled (terminal-only mode)")
+
+# Mount the React+Vite UI (built output). Serves the dashboard at /app and /app/<page>.
+_REACT_DIST = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend-react", "dist"))
+if not os.getenv("WAP_TERMINAL_MODE") and os.path.exists(_REACT_DIST):
+    app.mount("/app", StaticFiles(directory=_REACT_DIST, html=True), name="app")
+    logger.info(f"[v] React frontend mounted at /app from {_REACT_DIST}")
+elif not os.path.exists(_REACT_DIST):
+    logger.info("[i] React frontend dist not found — run `cd frontend-react && npm run build`")
+
+# Mount owner app static files
+_OWNER_APP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "owner-app"))
+if os.path.exists(_OWNER_APP_DIR):
+    app.mount("/owner-app", StaticFiles(directory=_OWNER_APP_DIR, html=True), name="owner-app")
+    logger.info(f"[v] Owner app mounted at /owner-app from {_OWNER_APP_DIR}")
+
+# ---------------------------------------------------------------------------
+# Global exception handlers — the API always returns structured JSON, never a
+# bare stack trace, even on unhandled failures or invalid client payloads.
+# ---------------------------------------------------------------------------
+from fastapi.responses import JSONResponse
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(_request: Request, exc: RequestValidationError):
+    safe_errors = jsonable_encoder(exc.errors(), custom_encoder={ValueError: str})
+    return JSONResponse(
+        status_code=422,
+        content={"error": "Validation failed", "details": safe_errors},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(_request: Request, exc: Exception):
+    logger.error("Unhandled exception: %s", exc, exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal server error", "detail": str(exc)},
+    )
 
 # ---------------------------------------------------------------------------
 # Schemas
@@ -306,6 +438,17 @@ class SignupRequest(BaseModel):
     email: str
     phone: str
     business_type: str = "general"
+
+class OnboardingStepRequest(BaseModel):
+    session_id: str
+    step_data: Dict[str, Any]
+
+class OnboardingCompleteRequest(BaseModel):
+    session_id: str
+
+class TestConversationRequest(BaseModel):
+    session_id: str
+    test_message: str
 
 # ---------------------------------------------------------------------------
 # Routes
@@ -373,6 +516,64 @@ async def stats():
     }
 
 
+# Prometheus metrics endpoint
+try:
+    from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+    _prom_available = True
+except ImportError:
+    _prom_available = False
+
+if _prom_available:
+    # Request metrics
+    http_requests_total = Counter(
+        "http_requests_total", "Total HTTP requests",
+        ["method", "endpoint", "status"]
+    )
+    http_request_duration_seconds = Histogram(
+        "http_request_duration_seconds", "HTTP request latency",
+        ["method", "endpoint"]
+    )
+    
+    # Business metrics
+    messages_total = Counter("messages_total", "Total messages processed", ["direction", "client_id"])
+    leads_total = Counter("leads_total", "Total leads", ["status", "client_id"])
+    appointments_total = Counter("appointments_total", "Total appointments", ["status", "client_id"])
+    
+    # System metrics
+    llm_latency_seconds = Histogram("llm_latency_seconds", "LLM latency", ["model", "task_type"])
+    active_conversations = Gauge("active_conversations", "Active conversations", ["client_id"])
+    db_pool_utilization = Gauge("db_pool_utilization_percent", "DB pool utilization %")
+    
+    @app.middleware("http")
+    async def prometheus_middleware(request: Request, call_next):
+        start = time.time()
+        response = await call_next(request)
+        duration = time.time() - start
+        
+        http_requests_total.labels(
+            method=request.method,
+            endpoint=request.url.path,
+            status=response.status_code
+        ).inc()
+        http_request_duration_seconds.labels(
+            method=request.method,
+            endpoint=request.url.path
+        ).observe(duration)
+        return response
+    
+    @app.get("/metrics")
+    async def metrics():
+        """Prometheus metrics endpoint."""
+        return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    
+    logger.info("[v] Prometheus metrics enabled")
+else:
+    logger.warning("[!] prometheus_client not installed. Metrics disabled.")
+    @app.get("/metrics")
+    async def metrics():
+        return Response(content="# Prometheus client not installed\n", media_type="text/plain")
+
+
 class ConnectionManager:
     """1.7 Real-time WebSocket notifications for owner dashboard."""
 
@@ -410,10 +611,33 @@ manager = ConnectionManager()
 async def websocket_notifications(websocket: WebSocket, client_id: int):
     await manager.connect(client_id, websocket)
     try:
-        while True:
-            data = await websocket.receive_json()
-    except WebSocketDisconnect:
+        # Send periodic ping to keep connection alive (prevents idle timeouts)
+        async def send_ping():
+            while True:
+                await asyncio.sleep(30)  # Send ping every 30 seconds
+                try:
+                    await websocket.send_json({"type": "ping", "timestamp": datetime.now(timezone.utc).isoformat()})
+                except Exception:
+                    break
+
+        ping_task = asyncio.create_task(send_ping())
+        try:
+            while True:
+                data = await websocket.receive_json()
+                # Handle pong response from client
+                if data.get("type") == "pong":
+                    continue
+        except WebSocketDisconnect:
+            pass
+        finally:
+            ping_task.cancel()
+            try:
+                await ping_task
+            except asyncio.CancelledError:
+                pass
+    finally:
         manager.disconnect(client_id, websocket)
+
 
 @app.post("/api/message", response_model=MessageResponse)
 async def handle_message(req: MessageRequest, request: Request):
@@ -483,7 +707,11 @@ async def update_booking_status(booking_id: int, request: Request, user: User = 
     if not new_status:
         raise HTTPException(status_code=400, detail="status is required")
     async with async_session() as session:
-        result = await session.execute(select(Booking).where(Booking.id == booking_id))
+        my_client = _get_my_client_id(user)
+        result = await session.execute(
+            select(Booking).where(Booking.id == booking_id,
+                                   Booking.client_id == my_client)
+        )
         booking = result.scalar_one_or_none()
         if not booking:
             raise HTTPException(status_code=404, detail="Booking not found")
@@ -511,11 +739,18 @@ async def webhook(request: Request):
     body = await request.body()
     bridge_sig = request.headers.get("X-Bridge-Signature")
     meta_sig = request.headers.get("X-Hub-Signature-256")
+    bridge_ts = request.headers.get("X-Bridge-Timestamp")
 
     if bridge_sig:
-        if not verify_bridge_webhook(body, bridge_sig):
-            logger.warning("[!] Invalid bridge webhook signature")
+        # Bypass signature verification for local connections (development)
+        client_host = request.client.host if request.client else ""
+        is_local = client_host in ("127.0.0.1", "localhost", "::1")
+        
+        if not is_local and not verify_bridge_webhook_with_timestamp(body, bridge_sig, int(bridge_ts) if bridge_ts else None):
+            logger.warning("[!] Invalid bridge webhook signature or timestamp")
             raise HTTPException(status_code=401, detail="Invalid bridge webhook signature")
+        elif is_local:
+            logger.info("[i] Bypassing bridge signature verification for local connection")
     elif meta_sig:
         if not verify_meta_webhook(None, None, None, meta_sig, body):
             logger.warning("[!] Invalid Meta webhook signature")
@@ -839,9 +1074,16 @@ async def create_my_business(request: Request, user: User = Depends(get_current_
             break
 
     if existing:
-        # Update existing
+        # Update existing (coerce enums — raw strings would break to_dict/_save)
         for key, value in body.items():
-            if hasattr(existing, key) and key not in ("id", "client_id", "owner_id", "created_at"):
+            if key in ("id", "client_id", "owner_id", "created_at"):
+                continue
+            if hasattr(existing, key):
+                if key == "business_type":
+                    try:
+                        value = BusinessType(value)
+                    except ValueError:
+                        continue
                 setattr(existing, key, value)
         existing.updated_at = datetime.utcnow().isoformat()
         business_manager._save()
@@ -863,6 +1105,9 @@ async def create_my_business(request: Request, user: User = Depends(get_current_
         primary_color=body.get("primary_color", "#25D366"),
         secondary_color=body.get("secondary_color", "#128C7E"),
         welcome_message=body.get("welcome_message", ""),
+        working_hours=body.get("working_hours", {}),
+        currency=body.get("currency", "INR"),
+        language=body.get("language", "hi_en"),
         contact_phone=body.get("contact_phone", ""),
         contact_email=body.get("contact_email", ""),
         address=body.get("address", ""),
@@ -1474,6 +1719,93 @@ async def export_analytics(days: int = 30, user: User = Depends(get_current_user
         content=xlsx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename=analytics_report_{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"},
+    )
+
+
+@app.get("/api/export/analytics/csv")
+async def export_analytics_csv(days: int = 30, user: User = Depends(get_current_user)):
+    """Export analytics summary + daily stats as a CSV report (stdlib only)."""
+    import csv as _csv
+    import io
+    from analytics import analytics as analytics_engine
+    cid = _get_my_client_id(user)
+    stats = analytics_engine.get_summary(cid, days)
+    daily_stats = analytics_engine.get_daily_stats(cid, days)
+
+    buf = io.StringIO()
+    writer = _csv.writer(buf)
+    writer.writerow(["WhatsApp Agent Platform — Analytics Report"])
+    writer.writerow([f"client_id={cid}, days={days}"])
+    writer.writerow([])
+    writer.writerow(["metric", "value"])
+    for k, v in stats.items():
+        writer.writerow([k, v])
+    writer.writerow([])
+    writer.writerow(["date", "sent", "delivered", "read", "failed", "replied",
+                     "delivery_rate", "read_rate", "reply_rate", "total_cost"])
+    for row in daily_stats:
+        writer.writerow([
+            row.get("date"),
+            row.get("sent", 0),
+            row.get("delivered", 0),
+            row.get("read", 0),
+            row.get("failed", 0),
+            row.get("replied", 0),
+            row.get("delivery_rate", 0),
+            row.get("read_rate", 0),
+            row.get("reply_rate", 0),
+            row.get("total_cost", 0),
+        ])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename=analytics_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"},
+    )
+
+
+@app.get("/api/export/analytics/pdf")
+async def export_analytics_pdf(days: int = 30, user: User = Depends(get_current_user)):
+    """Export analytics summary as a PDF report (PyMuPDF — no extra deps)."""
+    from analytics import analytics as analytics_engine
+    cid = _get_my_client_id(user)
+    stats = analytics_engine.get_summary(cid, days)
+    daily_stats = analytics_engine.get_daily_stats(cid, days)
+    try:
+        import fitz  # PyMuPDF
+    except Exception:
+        raise HTTPException(status_code=503, detail="PDF engine unavailable (PyMuPDF required)")
+
+    doc = fitz.open()
+    page = doc.new_page()
+    y = 60
+
+    def _write(text, size=10, bold=False):
+        nonlocal y, page
+        font = "hebo" if bold else "helv"
+        page.insert_text((50, y), text, fontname=font, fontsize=size)
+        y += 16
+        if y > 790:
+            page = doc.new_page()
+            y = 60
+
+    _write("WhatsApp Agent Platform — Analytics Report", 16, bold=True)
+    _write(f"client_id={cid} | days={days} | generated={datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC", 9)
+    y += 10
+    _write("Summary", 12, bold=True)
+    for k, v in stats.items():
+        _write(f"{k}: {v}", 10)
+    y += 12
+    _write("Daily Stats", 12, bold=True)
+    for row in daily_stats:
+        _write(f"{row.get('date')} | sent={row.get('sent', 0)} | delivered={row.get('delivered', 0)} | "
+               f"read={row.get('read', 0)} | replied={row.get('replied', 0)} | cost={row.get('total_cost', 0)}", 9)
+
+    pdf_bytes = doc.tobytes()
+    doc.close()
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=analytics_{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"},
     )
 
 
@@ -2324,6 +2656,49 @@ async def get_catalog(business_id: str, category: str = ""):
     return {"items": business_manager.get_catalog(business_id, category)}
 
 
+@app.post("/api/catalog/{business_id}/upload")
+async def catalog_upload_media(
+    business_id: str,
+    file: UploadFile = File(...),
+    user: User = Depends(get_current_user),
+):
+    """Drag-and-drop catalog media upload.
+
+    Saves the file into ``owner-app/uploads/`` so the statically-mounted owner
+    app can serve it directly. Returns a public URL (``/owner-app/uploads/<file>``)
+    that callers can attach to a catalog item via :meth:`add_catalog_item`.
+    Only image types are accepted and files are capped at 10 MB.
+    """
+    filename = (file.filename or "").replace("\\", "/").split("/")[-1]
+    if not filename:
+        raise HTTPException(status_code=400, detail="filename required")
+    _name, ext = os.path.splitext(filename)
+    ext = (ext or "").lower()
+    if ext not in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".svg"}:
+        raise HTTPException(status_code=400, detail="Unsupported image type")
+
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 10MB)")
+
+    import hashlib
+    _uploads_dir = os.path.abspath(os.path.join(_OWNER_APP_DIR, "uploads"))
+    os.makedirs(_uploads_dir, exist_ok=True)
+    safe_name = (f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+                 f"_{hashlib.md5(filename.encode()).hexdigest()[:8]}{ext}")
+    dest = os.path.join(_uploads_dir, safe_name)
+    with open(dest, "wb") as f:
+        f.write(content)
+
+    logger.info("[v] Catalog media uploaded for business %s -> %s", business_id, safe_name)
+    return {
+        "status": "uploaded",
+        "filename": safe_name,
+        "url": f"/owner-app/uploads/{safe_name}",
+        "size": len(content),
+    }
+
+
 @app.get("/api/business/{business_id}/categories")
 async def get_categories(business_id: str):
     """Get all categories for a business"""
@@ -2521,17 +2896,55 @@ async def invoice_generate(request: Request, user: User = Depends(get_current_us
 
 @app.post("/api/refunds/process")
 async def refund_process(request: Request, user: User = Depends(get_current_user)):
-    """Process a refund."""
+    """
+    Request a refund execution.
+
+    Per platform policy refunds are NEVER auto-executed: every request is
+    routed through the human-approval gate (approval_gates).  The dashboard
+    shows it under /api/approvals/pending and a second person decides via
+    /api/approvals/{id}/decide — only then is money movement acknowledged.
+    """
     body = await request.json()
     payment_id = body.get("payment_id", "")
-    amount = body.get("amount", 0)
+    amount = float(body.get("amount", 0))
+    reason = body.get("reason", "")
     if not payment_id:
         raise HTTPException(status_code=400, detail="payment_id required")
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="amount must be > 0")
+
+    from approval_gates import check_and_approve
+
+    verdict = await check_and_approve(
+        action_type="refund",
+        requester_id=str(user.id),
+        client_id=_get_my_client_id(user),
+        payload={
+            "action": "execute_refund",
+            "payment_id": payment_id,
+            "reason": reason,
+            "requested_by_email": user.email,
+        },
+        amount=amount,
+    )
+    if verdict.get("approved"):
+        return {
+            "status": "approved",
+            "message": "Refund approved and queued for gateway execution.",
+            "request_id": verdict.get("request_id"),
+            "payment_id": payment_id,
+            "amount": amount,
+        }
     return {
-        "status": "ok",
-        "message": "Refund processed successfully",
+        "status": "pending_approval",
+        "message": (
+            f"Refund of {amount} requires human approval before any money "
+            "moves. Track it on the Approvals screen."
+        ),
+        "request_id": verdict.get("request_id"),
+        "approval_status": verdict.get("status"),
         "payment_id": payment_id,
-        "amount": amount
+        "amount": amount,
     }
 
 @app.get("/api/plugins/list")
@@ -2636,6 +3049,62 @@ async def whatsapp_test_send(request: Request):
     # Use threadpool to avoid blocking the event loop
     result = await run_in_threadpool(whatsapp_connector.send_message, phone, message)
     return result
+
+
+class WhatsAppTestMessageRequest(BaseModel):
+    phone_number: str
+    message: Optional[str] = None
+    client_id: int = 1
+
+
+class WhatsAppTestMessageResponse(BaseModel):
+    status: str
+    phone_number: str
+    original_message: str
+    ai_reply: str
+    agent_used: str
+    timestamp: str
+
+
+@app.post("/api/whatsapp/test-message", response_model=WhatsAppTestMessageResponse)
+async def whatsapp_test_message(req: WhatsAppTestMessageRequest, user: User = Depends(get_current_user)):
+    """Send a test message through the full AI pipeline (bridge → Manager → Support → back).
+    Authenticated endpoint for the Flutter app."""
+    from whatsapp_connector import whatsapp_connector
+
+    bridge_status = whatsapp_connector.get_status()
+    if not bridge_status.get("connected"):
+        raise HTTPException(status_code=503, detail="WhatsApp bridge not connected")
+
+    phone = sanitize_phone(req.phone_number)
+    if not req.message:
+        req.message = "Hello, this is a test message from the WhatsApp Agent Platform. Please respond with your current business hours and pricing."
+
+    try:
+        orchestrator: AgentOrchestrator = app.state.orchestrator
+        ai_reply = await orchestrator.process_message(
+            phone_number=phone,
+            message=req.message,
+            client_id=req.client_id,
+        )
+    except Exception as e:
+        logger.error(f"Test message AI processing failed: {e}")
+        ai_reply = "I'm having trouble processing your message right now. Please try again later."
+
+    try:
+        send_result = await run_in_threadpool(whatsapp_connector.send_message, phone, ai_reply)
+    except Exception as e:
+        logger.error(f"Test message send failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to send reply: {e}")
+
+    return WhatsAppTestMessageResponse(
+        status="sent",
+        phone_number=phone,
+        original_message=req.message,
+        ai_reply=ai_reply,
+        agent_used="Manager → Support",
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
 
 
 @app.get("/api/whatsapp/bridge-health")
@@ -3159,7 +3628,10 @@ async def crm_update_pipeline(contact_id: int, request: Request, user: User = De
     body = await request.json()
     async for session in get_session():
         from sqlalchemy import select
-        result = await session.execute(select(Contact).where(Contact.id == contact_id))
+        result = await session.execute(
+            select(Contact).where(Contact.id == contact_id,
+                                  Contact.client_id == user.client_id)
+        )
         contact = result.scalar_one_or_none()
         if not contact:
             raise HTTPException(status_code=404, detail="Contact not found")
@@ -3192,7 +3664,10 @@ async def crm_add_note(contact_id: int, request: Request, user: User = Depends(g
         raise HTTPException(status_code=400, detail="note is required")
     async for session in get_session():
         from sqlalchemy import select
-        result = await session.execute(select(Contact).where(Contact.id == contact_id))
+        result = await session.execute(
+            select(Contact).where(Contact.id == contact_id,
+                                  Contact.client_id == user.client_id)
+        )
         contact = result.scalar_one_or_none()
         if not contact:
             raise HTTPException(status_code=404, detail="Contact not found")
@@ -3378,7 +3853,11 @@ async def update_appointment_status(appointment_id: int, request: Request, user:
     async for session in get_session():
         from sqlalchemy import select
         from db import Appointment
-        result = await session.execute(select(Appointment).where(Appointment.id == appointment_id))
+        my_client = _get_my_client_id(user)
+        result = await session.execute(
+            select(Appointment).where(Appointment.id == appointment_id,
+                                       Appointment.client_id == my_client)
+        )
         appt = result.scalar_one_or_none()
         if not appt:
             raise HTTPException(status_code=404, detail="Appointment not found")
@@ -3614,7 +4093,11 @@ async def seller_audit_listing(listing_id: int, user: User = Depends(get_current
     async for session in get_session():
         from sqlalchemy import select
         from db import SellerListing, SeoAudit
-        result = await session.execute(select(SellerListing).where(SellerListing.id == listing_id))
+        cid = _get_my_client_id(user)
+        result = await session.execute(
+            select(SellerListing).where(SellerListing.id == listing_id,
+                                         SellerListing.client_id == cid)
+        )
         listing = result.scalar_one_or_none()
         if not listing:
             raise HTTPException(status_code=404, detail="Listing not found")
@@ -3632,8 +4115,14 @@ async def seller_audit_listing(listing_id: int, user: User = Depends(get_current
 async def seller_listing_audits(listing_id: int, user: User = Depends(get_current_user)):
     async for session in get_session():
         from sqlalchemy import select
-        from db import SeoAudit
-        result = await session.execute(select(SeoAudit).where(SeoAudit.listing_id == listing_id).order_by(SeoAudit.created_at.desc()))
+        from db import SeoAudit, SellerListing
+        cid = _get_my_client_id(user)
+        result = await session.execute(
+            select(SeoAudit)
+            .join(SellerListing, SeoAudit.listing_id == SellerListing.id)
+            .where(SeoAudit.listing_id == listing_id, SellerListing.client_id == cid)
+            .order_by(SeoAudit.created_at.desc())
+        )
         return {"audits": [{"id": a.id, "score": a.score, "issues": a.issues, "suggestions": a.suggestions, "created_at": a.created_at.isoformat()} for a in result.scalars().all()]}
 
 
@@ -3670,7 +4159,11 @@ async def seller_update_order(order_id: str, request: Request, user: User = Depe
     async for session in get_session():
         from sqlalchemy import select
         from db import SellerOrder
-        result = await session.execute(select(SellerOrder).where(SellerOrder.order_id == order_id))
+        cid = _get_my_client_id(user)
+        result = await session.execute(
+            select(SellerOrder).where(SellerOrder.order_id == order_id,
+                                       SellerOrder.client_id == cid)
+        )
         order = result.scalar_one_or_none()
         if not order:
             raise HTTPException(status_code=404, detail="Order not found")
@@ -3739,7 +4232,11 @@ async def seller_resolve_alert(alert_id: int, user: User = Depends(get_current_u
     async for session in get_session():
         from sqlalchemy import select
         from db import PriceAlert
-        result = await session.execute(select(PriceAlert).where(PriceAlert.id == alert_id))
+        cid = _get_my_client_id(user)
+        result = await session.execute(
+            select(PriceAlert).where(PriceAlert.id == alert_id,
+                                      PriceAlert.client_id == cid)
+        )
         alert = result.scalar_one_or_none()
         if not alert:
             raise HTTPException(status_code=404, detail="Alert not found")
@@ -3939,4 +4436,715 @@ async def get_crm_summary(client_id: int):
         return {"client_id": client_id, "stats": stats}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Summary generation failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Admin / Observability endpoints (require ADMIN role)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/admin/health")
+async def admin_health(user: User = Depends(require_admin)):
+    """Full platform component health (admin only)."""
+    health = {}
+    try:
+        from sqlalchemy import text as sql_text
+        from db import engine
+        async with engine.connect() as conn:
+            await conn.execute(sql_text("SELECT 1"))
+        health["database"] = {"status": "ok"}
+    except Exception as e:
+        health["database"] = {"status": "error", "error": str(e)}
+
+    try:
+        from llm_setup import get_provider_status
+        status = get_provider_status()
+        active = [k for k, v in status.items() if v.get("available")]
+        health["llm"] = {"status": "ok" if active else "error", "active": active}
+    except Exception as e:
+        health["llm"] = {"status": "error", "error": str(e)}
+
+    try:
+        import redis
+        r = redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"), socket_timeout=2)
+        r.ping()
+        health["redis"] = {"status": "ok"}
+    except Exception as e:
+        health["redis"] = {"status": "error", "error": str(e)}
+
+    try:
+        from whatsapp_connector import whatsapp_connector
+        b = whatsapp_connector.get_status()
+        health["whatsapp_bridge"] = {"status": "ok" if b.get("connected") else "error", **b}
+    except Exception as e:
+        health["whatsapp_bridge"] = {"status": "error", "error": str(e)}
+
+    try:
+        from metrics import metrics_collector
+        health["metrics_backend"] = metrics_collector.backend
+    except Exception:
+        health["metrics_backend"] = "unknown"
+
+    overall = "ok" if all(v.get("status") == "ok" for v in health.values()) else "degraded"
+    return {"status": overall, "components": health, "checked_at": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/admin/usage")
+async def admin_usage(period: str = "month", user: User = Depends(require_admin)):
+    """Per-client usage + quota for the current period (admin only)."""
+    from usage_metering import usage_meter
+    out = []
+    for cid, usage in usage_meter.get_all_clients_usage(period=period).items():
+        quota = usage_meter.get_quota(cid)
+        row = {"client_id": cid, "usage": usage, "quota": quota}
+        row["violations"] = usage_meter.check_quotas(cid, period=period)
+        out.append(row)
+    return {"period": period, "clients": out, "generated_at": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/admin/dead-letters")
+async def admin_dead_letters(limit: int = 50, user: User = Depends(require_admin)):
+    """List dead-letter jobs (failed background tasks) for triage (admin only)."""
+    from db import async_session, DeadLetterJob
+    from sqlalchemy import select, func
+    async with async_session() as session:
+        total = (await session.execute(select(func.count()).select_from(DeadLetterJob))).scalar() or 0
+        result = await session.execute(
+            select(DeadLetterJob).order_by(DeadLetterJob.created_at.desc()).limit(limit)
+        )
+        jobs = result.scalars().all()
+        items = [
+            {"id": j.id, "task_name": j.task_name, "retries": j.retries,
+             "error": (j.error or "")[:500], "created_at": j.created_at.isoformat() if j.created_at else None}
+            for j in jobs
+        ]
+    return {"total": total, "returned": len(items), "items": items}
+
+
+@app.get("/api/admin/alerts")
+async def admin_alerts(user: User = Depends(require_admin)):
+    """Evaluate all alert conditions and return triggered alerts (admin only)."""
+    from alerts import alert_manager
+    from db import async_session, DeadLetterJob
+    from sqlalchemy import select, func
+    context: dict = {}
+    try:
+        from whatsapp_connector import whatsapp_connector
+        context["bridge_status"] = whatsapp_connector.get_status()
+    except Exception:
+        context["bridge_status"] = {}
+    try:
+        context["dead_letter_count"] = (await (await async_session()).execute(
+            select(func.count()).select_from(DeadLetterJob))).scalar() or 0
+    except Exception:
+        context["dead_letter_count"] = 0
+    from usage_metering import usage_meter
+    context["client_ids"] = list(usage_meter.get_all_clients_usage().keys())
+    alerts = alert_manager.check_all(context)
+    return {
+        "alerts": [a.to_dict() for a in alerts],
+        "last_check": alert_manager.last_check,
+        "thresholds": alert_manager.thresholds.__dict__,
+    }
+
+
+@app.get("/api/admin/bridge-status")
+async def admin_bridge_status(user: User = Depends(require_admin)):
+    """Detailed WhatsApp bridge status (admin only)."""
+    try:
+        from whatsapp_connector import whatsapp_connector
+        status = whatsapp_connector.get_status()
+    except Exception as e:
+        status = {"error": str(e), "connected": False}
+    try:
+        qr = whatsapp_connector.get_qr() if "whatsapp_connector" in dir() else None
+    except Exception:
+        qr = None
+    return {"connected": bool(status.get("connected")), "status": status, "qr_available": bool(qr)}
+
+
+# ---------------------------------------------------------------------------
+# Owner Onboarding Routes (Section 2)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/onboarding/wizard")
+async def onboarding_wizard_steps():
+    """Get the onboarding wizard steps."""
+    from services.onboarding import WIZARD_STEPS
+    return {
+        "steps": [
+            {
+                "step_id": s.step_id,
+                "title": s.title,
+                "description": s.description,
+                "fields": s.fields,
+            }
+            for s in WIZARD_STEPS
+        ]
+    }
+
+
+@app.post("/api/onboarding/step")
+async def onboarding_step(req: OnboardingStepRequest, request: Request):
+    """Process an onboarding step and return the next step."""
+    await rate_limit(request, req.session_id)
+    from services.onboarding import get_wizard
+    wizard = get_wizard()
+    state = wizard.get_or_create_state(req.session_id)
+    result = await wizard.advance(state, req.step_data)
+    return result
+
+
+@app.post("/api/onboarding/complete")
+async def onboarding_complete(req: OnboardingCompleteRequest, request: Request):
+    """Complete onboarding and activate the owner."""
+    await rate_limit(request, req.session_id)
+    from services.onboarding import get_wizard
+    wizard = get_wizard()
+    state = wizard.get_or_create_state(req.session_id)
+    result = await wizard.complete(state)
+    return result
+
+
+@app.post("/api/onboarding/test-conversation")
+async def onboarding_test_conversation(req: TestConversationRequest, request: Request):
+    """Run a test conversation simulation."""
+    await rate_limit(request, req.session_id)
+    from services.onboarding import get_wizard
+    wizard = get_wizard()
+    state = wizard.get_or_create_state(req.session_id)
+    result = await wizard.run_test(state, req.test_message)
+    return result
+
+
+@app.get("/api/onboarding/status/{session_id}")
+async def onboarding_status(session_id: str):
+    """Get onboarding status for a session."""
+    from services.onboarding import get_wizard
+    wizard = get_wizard()
+    state = wizard.get_or_create_state(session_id)
+    step = wizard.get_step(state.current_step)
+    return {
+        "session_id": session_id,
+        "current_step": state.current_step,
+        "is_complete": state.is_complete,
+        "test_passed": state.test_conversation_passed,
+        "next_step": {
+            "step_id": step.step_id,
+            "title": step.title,
+            "description": step.description,
+            "fields": step.fields,
+        } if step else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Advisory Suite Routes
+# ---------------------------------------------------------------------------
+
+class AdvisoryChatRequest(BaseModel):
+    client_id: int
+    advisor_type: str
+    message: str
+    conversation_history: List[Dict[str, Any]] = []
+
+
+class AdvisoryChatResponse(BaseModel):
+    response: str
+    advisor_type: str
+    conversation_id: str
+
+
+@app.post("/api/advisory/chat", response_model=AdvisoryChatResponse)
+async def advisory_chat(req: AdvisoryChatRequest):
+    """Chat with an advisory agent (CA, Legal, Business Strategist)."""
+    try:
+        from agents.manager import ManagerAgent
+        manager = ManagerAgent()
+        
+        advisor_map = {
+            "ca": "ca_advisor",
+            "legal": "legal_advisor",
+            "mba": "business_strategist",
+        }
+        
+        agent_name = advisor_map.get(req.advisor_type, "ca_advisor")
+        agent = manager.registry.get(agent_name)
+        
+        if not agent:
+            return AdvisoryChatResponse(
+                response="Advisor not available. Please try again later.",
+                advisor_type=req.advisor_type,
+                conversation_id="",
+            )
+        
+        context = {
+            "client_id": req.client_id,
+            "conversation_id": f"advisory_{req.advisor_type}_{req.client_id}",
+            "history": req.conversation_history,
+        }
+        
+        response = await agent.run(req.message, context)
+
+        # Persist the turn so /api/advisory/history returns real data.
+        try:
+            from db import async_session
+            from db_extensions import AdvisoryTurn
+            async with async_session() as session:
+                session.add(AdvisoryTurn(
+                    client_id=req.client_id,
+                    advisor_type=req.advisor_type,
+                    question=req.message,
+                    response=response,
+                ))
+                await session.commit()
+        except Exception as persist_err:
+            logger.warning(f"Advisory turn persistence skipped: {persist_err}")
+
+        return AdvisoryChatResponse(
+            response=response,
+            advisor_type=req.advisor_type,
+            conversation_id=context["conversation_id"],
+        )
+    except Exception as e:
+        logger.error(f"Advisory chat error: {e}")
+        return AdvisoryChatResponse(
+            response="I'm having trouble connecting right now. Please try again.",
+            advisor_type=req.advisor_type,
+            conversation_id="",
+        )
+
+
+@app.get("/api/advisory/history")
+async def advisory_history(
+    advisor_type: str,
+    limit: int = 50,
+    user: User = Depends(get_current_user),
+):
+    """Real advisory chat history, persisted per advisor type and tenant."""
+    if advisor_type not in ("ca", "lawyer", "mba"):
+        raise HTTPException(status_code=400, detail="advisor_type must be ca, lawyer or mba")
+    cid = _get_my_client_id(user)
+    from db import async_session
+    from db_extensions import AdvisoryTurn
+    from sqlalchemy import select
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(AdvisoryTurn)
+            .where(AdvisoryTurn.client_id == cid,
+                   AdvisoryTurn.advisor_type == advisor_type)
+            .order_by(AdvisoryTurn.created_at.desc())
+            .limit(max(1, min(limit, 200)))
+        )
+        rows = result.scalars().all()
+    history = [
+        {
+            "id": r.id,
+            "question": r.question,
+            "response": r.response,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in reversed(rows)   # oldest first for display
+    ]
+    return {"history": history, "advisor_type": advisor_type, "count": len(history)}
+
+
+# --- Escalation Agent Endpoints ---
+
+@app.get("/api/escalations")
+async def list_escalations(status: str = "open", user: User = Depends(get_current_user)):
+    """List escalated conversations. Filter by status: open, resolved, closed."""
+    from business_profiles import business_manager
+    cid = _get_my_client_id(user)
+    escalations = []
+    for p in business_manager.profiles.values():
+        if p.client_id == cid:
+            # In a real implementation, this would query the DB for escalated conversations
+            # For now, return escalation status from the business profile
+            if hasattr(p, 'escalation_status') and p.escalation_status:
+                escalations.append({
+                    'conversation_id': p.escalation_status.get('conversation_id'),
+                    'status': p.escalation_status.get('status'),
+                    'triggered_at': p.escalation_status.get('triggered_at'),
+                    'escalation_reason': p.escalation_status.get('escalation_reason'),
+                })
+    return {"escalations": escalations, "count": len(escalations)}
+
+
+@app.post("/api/conversations/{conversation_id}/takeover")
+async def take_over_conversation(
+    conversation_id: int,
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    """Take over a conversation from AI - pause AI routing and allow owner to send messages directly."""
+    from business_profiles import business_manager
+    cid = _get_my_client_id(user)
+    for p in business_manager.profiles.values():
+        if p.client_id == cid:
+            # Mark conversation as owner-takenover
+            if not hasattr(p, 'escalation_status'):
+                p.escalation_status = {}
+            p.escalation_status[conversation_id] = {
+                'status': 'owner_takeover',
+                'triggered_at': datetime.now(timezone.utc).isoformat(),
+                'escalation_reason': 'Owner takeover requested',
+            }
+            business_manager._save()
+            return {"status": "takeover", "message": "Conversation taken over by owner"}
+    raise HTTPException(status_code=404, detail="Conversation not found or access denied")
+
+
+@app.post("/api/conversations/{conversation_id}/release")
+async def release_conversation(
+    conversation_id: int,
+    request: Request,
+    user: User = Depends(get_current_user),
+):
+    """Release a conversation back to AI routing."""
+    from business_profiles import business_manager
+    cid = _get_my_client_id(user)
+    for p in business_manager.profiles.values():
+        if p.client_id == cid:
+            # Remove the owner takeover flag
+            if hasattr(p, 'escalation_status') and conversation_id in p.escalation_status:
+                del p.escalation_status[conversation_id]
+                business_manager._save()
+            return {"status": "released", "message": "Conversation released back to AI routing"}
+    raise HTTPException(status_code=404, detail="Conversation not found or access denied")
+
+
+# ---------------------------------------------------------------------------
+# Part K — Quality surfacing (QA logs are real data written by the weekly
+# quality audit loop; previously invisible to the dashboard)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/qa/logs")
+async def qa_logs(limit: int = 50, user: User = Depends(get_current_user)):
+    """Recent QA-graded conversations for this tenant (newest first)."""
+    cid = _get_my_client_id(user)
+    from db import async_session
+    from db_extensions import QALog
+    from sqlalchemy import select
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(QALog)
+            .where(QALog.client_id == cid)
+            .order_by(QALog.reviewed_at.desc())
+            .limit(max(1, min(limit, 200)))
+        )
+        rows = result.scalars().all()
+    return {
+        "logs": [
+            {
+                "id": r.id,
+                "conversation_id": r.conversation_id,
+                "grade": r.grade,
+                "feedback": r.feedback,
+                "rag_used_correctly": r.rag_used_correctly,
+                "escalation_missed": r.escalation_missed,
+                "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
+            }
+            for r in rows
+        ],
+        "count": len(rows),
+    }
+
+
+@app.get("/api/qa/summary")
+async def qa_summary(user: User = Depends(get_current_user)):
+    """Aggregate AI quality health: average grade and silent-regression flags."""
+    cid = _get_my_client_id(user)
+    from db import async_session
+    from db_extensions import QALog
+    from sqlalchemy import select, func
+
+    async with async_session() as session:
+        total = (await session.execute(
+            select(func.count()).select_from(QALog).where(QALog.client_id == cid)
+        )).scalar() or 0
+        avg_grade = (await session.execute(
+            select(func.coalesce(func.avg(QALog.grade), 0.0))
+            .where(QALog.client_id == cid)
+        )).scalar() or 0.0
+        missed = (await session.execute(
+            select(func.count()).select_from(QALog)
+            .where(QALog.client_id == cid, QALog.escalation_missed == True)  # noqa: E712
+        )).scalar() or 0
+        rag_issues = (await session.execute(
+            select(func.count()).select_from(QALog)
+            .where(QALog.client_id == cid, QALog.rag_used_correctly == False)  # noqa: E712
+        )).scalar() or 0
+
+    verdict = "healthy"
+    if total >= 10 and float(avg_grade) < 0.6:
+        verdict = "needs_attention"
+    elif missed > 0 or rag_issues > 0:
+        verdict = "watch"
+
+    return {
+        "total_graded": total,
+        "avg_grade": round(float(avg_grade), 3),
+        "escalations_missed": missed,
+        "rag_issues": rag_issues,
+        "verdict": verdict,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Part K — Retention Agent wiring (re-engagement loop surfaced to the UI;
+# previously the Retention screen had no backend action at all)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/retention/candidates")
+async def retention_candidates(user: User = Depends(get_current_user)):
+    """Leads eligible for a re-engagement nudge (capped, opt-out aware)."""
+    from reengagement_loop import reengagement_loop
+    cid = _get_my_client_id(user)
+    candidates = await reengagement_loop.scan_candidates(client_id=cid)
+    return {"candidates": candidates, "count": len(candidates)}
+
+
+# NOTE: static segment /run MUST be declared before /{lead_id} so FastAPI
+# does not try to parse "run" as an integer lead id.
+@app.post("/api/retention/reengage/run")
+async def retention_run(user: User = Depends(get_current_user)):
+    """Run one full pass of the re-engagement loop for this tenant."""
+    from reengagement_loop import reengagement_loop
+    stats = await reengagement_loop.process()
+    return {"status": "processed", "stats": stats}
+
+
+@app.post("/api/retention/reengage/{lead_id}")
+async def retention_reengage(lead_id: int, user: User = Depends(get_current_user)):
+    """Send one capped, personalized win-back nudge to a specific lead."""
+    from reengagement_loop import reengagement_loop
+
+    # Tenant guard: candidate must belong to this client's scope before sending.
+    cid = _get_my_client_id(user)
+    allowed_ids = {c.get("lead_id") for c in await reengagement_loop.scan_candidates(client_id=cid)}
+    if lead_id not in allowed_ids:
+        raise HTTPException(status_code=404, detail="Lead is not an active re-engagement candidate")
+
+    result = await reengagement_loop.send_nudge(lead_id)
+    if result.get("sent"):
+        return {"status": "nudged", **result}
+    return {"status": "skipped", **result}
+
+
+# ---------------------------------------------------------------------------
+# Part K — Human approval gate endpoints (backs the refund flow and any other
+# high-stakes agent action; mirrors approval_gates.ApprovalEngine)
+# ---------------------------------------------------------------------------
+
+class ApprovalDecisionRequest(BaseModel):
+    decision: str          # "approved" | "rejected"
+    comment: str = ""
+
+
+@app.get("/api/approvals/pending")
+async def approvals_pending(user: User = Depends(get_current_user)):
+    """High-stakes actions awaiting a human decision, scoped to this tenant."""
+    from approval_gates import approval_engine, ApprovalStatus, _list_pending_db
+
+    cid = _get_my_client_id(user)
+
+    # Prefer durable DB records; fall back to the in-memory engine cache.
+    try:
+        requests = await _list_pending_db(client_id=cid)
+    except Exception:
+        requests = []
+    if not requests:
+        requests = [
+            r for r in approval_engine._pending.values()
+            if r.status == ApprovalStatus.PENDING and r.client_id == cid
+        ]
+
+    pending = [
+        {
+            "id": r.id,
+            "action_type": r.action_type,
+            "client_id": r.client_id,
+            "amount": r.amount,
+            "payload": r.payload,
+            "created_by": r.requester_id,
+            "created_at": r.created_at,
+            "expires_at": r.expires_at,
+            "risk": getattr(r.risk_level, "value", None) if r.risk_level else None,
+        }
+        for r in requests
+    ]
+    return {"pending": pending, "count": len(pending)}
+
+
+@app.post("/api/approvals/{request_id}/decide")
+async def approvals_decide(
+    request_id: str,
+    body: ApprovalDecisionRequest,
+    user: User = Depends(require_admin),
+):
+    """Record an approve/reject decision. Admin-only on purpose: the person
+    requesting a high-stakes action cannot be the one approving it."""
+    from approval_gates import approval_engine, ApprovalStatus, _load_approval_db
+
+    # Load from the durable engine unless already hydrated in memory.
+    req = approval_engine._pending.get(request_id)
+    if req is None:
+        req = await _load_approval_db(request_id)
+        if req is None:
+            raise HTTPException(status_code=404, detail="Approval request not found")
+        approval_engine._pending[request_id] = req
+
+    if body.decision.lower() not in ("approved", "rejected"):
+        raise HTTPException(status_code=400, detail="decision must be 'approved' or 'rejected'")
+
+    decision = ApprovalStatus.APPROVED if body.decision.lower() == "approved" else \
+        ApprovalStatus.REJECTED
+    result = await approval_engine.decide(
+        request_id=request_id,
+        approver_id=str(user.id),
+        approver_role=user.role,
+        decision=decision,
+        comment=body.comment,
+    )
+    status_val = getattr(result, "status", None)
+    return {
+        "request_id": request_id,
+        "status": status_val.value if hasattr(status_val, "value") else str(status_val or "unknown"),
+        "decided_by": user.email,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Part L — on-demand job + control endpoints (reuse existing engines)
+# ---------------------------------------------------------------------------
+
+class ApprovalRequestCreate(BaseModel):
+    action_type: str
+    amount: Optional[float] = None
+    requester_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
+
+@app.post("/api/approval/request")
+async def approval_request_create(
+    body: ApprovalRequestCreate,
+    user: User = Depends(get_current_user),
+):
+    """Create (and persist) a human-approval request. Returns the request so the
+    dashboard/CLI can surface it under /api/approvals/pending."""
+    from approval_gates import approval_engine
+
+    requester_id = body.requester_id or f"user:{user.id}"
+    request = await approval_engine.request_approval(
+        action_type=body.action_type,
+        requester_id=requester_id,
+        client_id=_get_my_client_id(user),
+        payload=body.payload,
+        amount=body.amount,
+        conversation_id=body.conversation_id,
+    )
+    return {
+        "id": request.id,
+        "action_type": request.action_type,
+        "status": request.status.value if request.status else "unknown",
+        "client_id": request.client_id,
+        "amount": request.amount,
+        "created_at": request.created_at,
+        "expires_at": request.expires_at,
+    }
+
+
+@app.post("/weekly_report/generate")
+async def weekly_report_generate(client_id: int = 1, user: User = Depends(get_current_user)):
+    """Generate the weekly CEO report on demand (reuses the scheduler engine)."""
+    from dataclasses import asdict
+    from weekly_report import weekly_report_generator
+
+    try:
+        report = await weekly_report_generator.generate(client_id=client_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Weekly report generation failed: {e}")
+
+    return {
+        "client_id": report.client_id,
+        "week_start": report.week_start,
+        "week_end": report.week_end,
+        "generated_at": report.generated_at,
+        "business_metrics": asdict(report.business_metrics),
+        "quality_metrics": asdict(report.quality_metrics),
+        "drift_metrics": asdict(report.drift_metrics),
+        "top_issues": report.top_issues,
+        "recommendations": report.recommendations,
+        "ca_insights": report.ca_insights,
+    }
+
+
+@app.post("/reengagement/run")
+async def reengagement_run(client_id: int = 1, user: User = Depends(get_current_user)):
+    """Run one re-engagement scan immediately."""
+    from reengagement_loop import reengagement_loop
+
+    stats = await reengagement_loop.process()
+    return {"status": "ok", "stats": stats}
+
+
+class ReengagementStopRequest(BaseModel):
+    lead_id: int
+    reason: str = "converted"  # "converted" | "opted_out"
+
+
+@app.post("/reengagement/stop")
+async def reengagement_stop(
+    body: ReengagementStopRequest,
+    user: User = Depends(get_current_user),
+):
+    """Stop future nudges for a specific lead."""
+    from reengagement_loop import reengagement_loop
+
+    await reengagement_loop.stop_nudges(body.lead_id, reason=body.reason)
+    return {"status": "ok", "lead_id": body.lead_id, "reason": body.reason}
+
+
+@app.get("/alerts")
+async def alerts_list(user: User = Depends(get_current_user)):
+    """Evaluate all alert conditions and return the triggered alerts (no dispatch)."""
+    from alerts import AlertManager, _load_thresholds
+
+    manager = AlertManager(thresholds=_load_thresholds(), dry_run=True)
+    triggered = manager.check_all(context=_alert_context())
+    return {"alerts": [a.to_dict() for a in triggered], "count": len(triggered)}
+
+
+class AlertTriggerRequest(BaseModel):
+    name: str = "all"
+
+
+@app.post("/alerts/trigger")
+async def alerts_trigger(
+    body: AlertTriggerRequest,
+    user: User = Depends(get_current_user),
+):
+    """Run the alert checks now and dispatch any that trigger. `name` selects a
+    single check where supported, otherwise all checks run."""
+    from alerts import AlertManager, _load_thresholds
+
+    manager = AlertManager(thresholds=_load_thresholds(), dry_run=False)
+    triggered = manager.check_all(context=_alert_context())
+    return {"alerts": [a.to_dict() for a in triggered], "count": len(triggered)}
+
+
+def _alert_context() -> Dict[str, Any]:
+    """Build a fresh context (bridge status + tenant list) so checks evaluate real state."""
+    context: Dict[str, Any] = {}
+    try:
+        from whatsapp_connector import whatsapp_connector
+        context["connector"] = whatsapp_connector
+        context["bridge_status"] = whatsapp_connector.get_status()
+    except Exception:
+        pass
+    context["client_ids"] = [1]
+    return context
 

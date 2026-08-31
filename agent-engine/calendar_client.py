@@ -48,5 +48,3 @@ class CalendarClient:
                 return resp.json() if resp.status_code == 200 else {"error": resp.text}
             except httpx.ConnectError:
                 return {"error": "Calendar service not available"}
-</arg_value>
-</write_to_file></tool_call>
