@@ -780,7 +780,20 @@ async def webhook(request: Request):
     # Existing message handling
     phone_number = sanitize_phone(data.get("from") or data.get("phone_number", ""))
     message = sanitize_text(data.get("body") or data.get("text") or data.get("message", ""))
-    client_id = data.get("client_id") or 1
+    client_id = data.get("client_id")
+    if not client_id:
+        # The bridge does not know the client_id — resolve the tenant from the
+        # active business profile(s). Single-profile (local/SMB) deployments map
+        # 1:1; multi-tenant setups must set DEFAULT_CLIENT_ID or send client_id.
+        try:
+            from business_profiles import business_manager
+            active = [p for p in business_manager.profiles.values() if p.is_active]
+            if len(active) == 1:
+                client_id = active[0].client_id
+            else:
+                client_id = int(os.getenv("DEFAULT_CLIENT_ID", "1"))
+        except Exception:
+            client_id = 1
     media_data = data.get("mediaData")
     media_mimetype = data.get("mediaMimetype")
 
@@ -1408,6 +1421,80 @@ class TemplateSendRequest(BaseModel):
     to_phone: str = ""
     use_cloud_api: bool = False
     template_id: str = ""
+
+
+class ManagerMessageRequest(BaseModel):
+    to_phone: str
+    instruction: str
+    send: bool = False
+
+
+@app.post("/api/manager/message")
+async def manager_message(req: ManagerMessageRequest, user: User = Depends(get_current_user)):
+    """Compose + send a message AS the business manager, using ONLY the
+    business profile facts (name, description, menu, hours, payments...).
+    Used by the CLI 'manager-message' command."""
+    import json as _json
+    from business_profiles import business_manager
+    from llm_setup import get_llm
+
+    cid = _get_my_client_id(user)
+    profile = next(
+        (p for p in business_manager.profiles.values()
+         if p.client_id == cid and p.is_active), None)
+    if not profile:
+        raise HTTPException(status_code=404,
+                            detail="No business profile found for your account. Run: python cli.py business-setup")
+
+    # Build the authoritative facts block (profile + catalog)
+    catalog = business_manager.catalogs.get(profile.id, [])
+    facts = profile.to_dict()
+    facts["catalog"] = [
+        {"name": i.name, "price": i.price, "category": i.category,
+         "description": i.description, "is_available": i.is_available}
+        for i in catalog
+    ]
+
+    system_prompt = (
+        "You are the owner/manager of the business described in BUSINESS FACTS below. "
+        "Write a WhatsApp message to a customer. STRICT RULES:\n"
+        "1. Use ONLY facts from BUSINESS FACTS — never invent prices, items, hours, or services.\n"
+        "2. Sound like a friendly human Indian business owner (warm, Hinglish-friendly tone).\n"
+        "3. Keep it under 900 characters, WhatsApp style, minimal emojis.\n"
+        "4. If a fact is not in BUSINESS FACTS, do not mention that topic.\n"
+        f"\n### BUSINESS FACTS:\n{_json.dumps(facts, ensure_ascii=False, default=str)}"
+    )
+    user_prompt = f"Customer phone: {req.to_phone}\nWrite this message: {req.instruction}"
+
+    try:
+        llm = get_llm()
+        resp = await llm.ainvoke([
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ])
+        text = resp.content if hasattr(resp, "content") else str(resp)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM composition failed: {e}")
+
+    result: Dict[str, Any] = {"status": "composed", "message": text,
+                              "business": profile.name}
+
+    if req.send:
+        from whatsapp_connector import whatsapp_connector
+        from config import settings
+        if not whatsapp_connector.get_status().get("connected"):
+            result["send_error"] = "WhatsApp bridge not connected — message composed but NOT sent"
+        else:
+            import httpx as _httpx
+            try:
+                async with _httpx.AsyncClient(timeout=15) as hc:
+                    r = await hc.post(f"{settings.whatsapp_bridge_url}/send",
+                                      json={"to": req.to_phone, "message": text})
+                    result["send_result"] = r.json() if r.status_code == 200 else {"status": "error", "message": r.text[:200]}
+                    result["status"] = "sent" if result["send_result"].get("status") == "sent" else "composed"
+            except Exception as e:
+                result["send_error"] = str(e)
+    return result
 
 
 @app.post("/api/templates/send")

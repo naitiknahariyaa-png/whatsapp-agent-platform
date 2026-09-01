@@ -248,6 +248,16 @@ def _ask_float(prompt: str, default: float) -> float:
         return default
 
 
+def cmd_manager_message(to_phone: str, instruction: str, send: bool,
+                        token: Optional[str] = None) -> Tuple[bool, Any]:
+    """Compose (and optionally send) a message AS the business manager,
+    strictly from the business profile facts."""
+    ok, resp = _call("POST", "/api/manager/message", token=token,
+                     json_body={"to_phone": to_phone, "instruction": instruction,
+                                "send": send})
+    return ok, resp
+
+
 def business_setup_interactive(token: Optional[str] = None) -> Tuple[bool, str]:
     """Guided CLI form: owner fills in all business details + menu.
 

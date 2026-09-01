@@ -92,6 +92,15 @@ def main(argv=None) -> int:
     s = sub.add_parser("my-business", help="Show your saved business profile and catalog")
     s.add_argument("--token")
 
+    s = sub.add_parser("manager-message",
+                       help="Compose (and optionally send) a WhatsApp message AS your business manager, using ONLY your business profile facts")
+    s.add_argument("--to", required=True, help="customer phone, e.g. 919876543210")
+    s.add_argument("--topic", required=True,
+                   help="what to write, e.g. 'tell them everything about the hotel and today's menu'")
+    s.add_argument("--send", action="store_true",
+                   help="actually send via WhatsApp (default: only compose and print)")
+    s.add_argument("--token")
+
     args = p.parse_args(argv)
 
     if args.command == "start-server":
@@ -132,6 +141,16 @@ def main(argv=None) -> int:
 
     elif args.command == "my-business":
         ok, data = cc.get_my_business(token)
+
+    elif args.command == "manager-message":
+        ok, data = cc.cmd_manager_message(args.to, args.topic, args.send, token)
+        if ok and isinstance(data, dict):
+            print(f"\n--- Message from {data.get('business', 'your business')} "
+                  f"({data.get('status')}) ---")
+            print(data.get("message", ""))
+            if data.get("send_error"):
+                print(f"\n[!] {data['send_error']}", file=sys.stderr)
+            return 0
 
     else:  # pragma: no cover
         p.print_help()
