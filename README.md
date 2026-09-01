@@ -184,6 +184,31 @@ pytest tests/test_tenant_isolation.py -v
 pytest tests/test_constraint_extraction_eval.py -v
 ```
 
+## Bulk Broadcast CLI
+
+Bulk-import phone numbers and run sequential, anti-ban-paced campaigns.
+Every send goes through the **same outbound pipeline** (opt-out checks, daily
+caps, per-recipient cooldown, randomized 5–20s delay) — there is no second sender.
+
+```powershell
+# from agent-engine/
+python -m cli.broadcast_cli import --file numbers.csv --list-name diwali_2026
+python -m cli.broadcast_cli import --paste --list-name walkin_leads
+python -m cli.broadcast_cli list-show --list-name diwali_2026
+python -m cli.broadcast_cli send --list-name diwali_2026 --message "Diwali sale! 20% off" --force
+python -m cli.broadcast_cli status --campaign-id 12
+python -m cli.broadcast_cli pause|resume|cancel --campaign-id 12
+```
+
+CSV format: first column = phone, optional second column = name (used for
+`{name}` personalization). Imports report invalid numbers (written to
+`invalid_numbers.txt`), duplicates, opted-out exclusions, and numbers that are
+already customers. Lists over 500 recipients require `--force`; quiet hours
+(`BROADCAST_QUIET_START`/`BROADCAST_QUIET_END`) are respected unless
+`--ignore-quiet-hours`. Campaigns survive crashes — `resume` continues from
+the first pending recipient and never double-sends.
+
+
 ## License
 
 Proprietary — WhatsApp Agent Platform

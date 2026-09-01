@@ -451,18 +451,19 @@ class OwnerApiKey(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
-from broadcast import BroadcastList, BroadcastCampaign  # noqa: F401 - ensure tables are registered
-# NOTE: Lead is intentionally NOT imported here at module scope. lead_gen.py also
-# imports from db (Base, async_session) at module scope, so a module-level
-# `from lead_gen import Lead` here can trip a "partially initialized module"
-# ImportError depending on import order. db.Lead is exposed lazily via the
-# module __getattr__ below so `from db import Lead` still works for consumers.
-
+# NOTE: Broadcast models are intentionally NOT imported here at module scope.
+# broadcast.py imports from db (Base, async_session) at module scope, so a
+# module-level `from broadcast import ...` can trip a "partially initialized
+# module" ImportError depending on import order. They are exposed lazily via
+# the module __getattr__ below, and registered eagerly in init_db/register.
 def __getattr__(name):
-    """PEP 562 lazy attribute: exposes db.Lead on first use (avoids circular import)."""
+    """PEP 562 lazy attributes (avoid circular imports at module scope)."""
     if name == "Lead":
         from lead_gen import Lead
         return Lead
+    if name in ("BroadcastList", "BroadcastCampaign"):
+        import broadcast as _broadcast
+        return getattr(_broadcast, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -474,6 +475,10 @@ async def register_loop_models():
     QA logs, advisory turns) would never get their tables on a fresh DB.
     """
     from lead_gen import Lead                        # noqa: F401 - register leads table
+    from broadcast import (                          # noqa: F401 - register broadcast tables
+        BroadcastList, BroadcastCampaign, ContactList,
+        ContactListMember, CampaignSend,
+    )
     from lead_funnel import LeadFunnelEnrollment      # noqa: F401
     from appointment_nurture import AppointmentNurtureEnrollment  # noqa: F401
     from compliance_loop import ConsentRecordDB, DataRetentionLog  # noqa: F401

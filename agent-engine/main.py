@@ -1429,6 +1429,82 @@ class ManagerMessageRequest(BaseModel):
     send: bool = False
 
 
+# ---------------------------------------------------------------------------
+# Bulk Broadcast (contact lists + sequential anti-ban campaigns)
+# ---------------------------------------------------------------------------
+
+class BroadcastImportRequest(BaseModel):
+    list_name: str
+    numbers: List[Dict[str, Any]]  # [{"phone": "...", "name": "..."}, ...]
+    source: str = "api"
+
+
+class BroadcastSendRequest(BaseModel):
+    list_name: str
+    message: str
+    force: bool = False
+    ignore_quiet_hours: bool = False
+
+
+@app.get("/api/broadcast/lists")
+async def broadcast_lists(user: User = Depends(get_current_user)):
+    from broadcast import broadcast_engine
+    return {"lists": await broadcast_engine.get_owner_lists(_get_my_client_id(user))}
+
+
+@app.post("/api/broadcast/import")
+async def broadcast_import(req: BroadcastImportRequest, user: User = Depends(get_current_user)):
+    from broadcast import broadcast_engine
+    entries = [(n.get("phone", ""), n.get("name", "")) for n in req.numbers]
+    result = await broadcast_engine.import_numbers(
+        _get_my_client_id(user), req.list_name, entries, source=req.source)
+    return result
+
+
+@app.get("/api/broadcast/list/{list_name}")
+async def broadcast_list_show(list_name: str, user: User = Depends(get_current_user)):
+    from broadcast import broadcast_engine
+    data = await broadcast_engine.get_contact_list(_get_my_client_id(user), list_name)
+    if not data:
+        raise HTTPException(status_code=404, detail=f"List '{list_name}' not found")
+    return data
+
+
+@app.post("/api/broadcast/send")
+async def broadcast_send(req: BroadcastSendRequest, user: User = Depends(get_current_user)):
+    from broadcast import broadcast_engine
+    return await broadcast_engine.launch_campaign(
+        _get_my_client_id(user), req.list_name, req.message,
+        force=req.force, ignore_quiet_hours=req.ignore_quiet_hours)
+
+
+@app.get("/api/broadcast/status/{campaign_id}")
+async def broadcast_status(campaign_id: int, user: User = Depends(get_current_user)):
+    from broadcast import broadcast_engine
+    stats = await broadcast_engine.campaign_stats(campaign_id)
+    if not stats:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return stats
+
+
+@app.post("/api/broadcast/pause/{campaign_id}")
+async def broadcast_pause(campaign_id: int, user: User = Depends(get_current_user)):
+    from broadcast import broadcast_engine
+    return await broadcast_engine.pause_campaign(campaign_id)
+
+
+@app.post("/api/broadcast/resume/{campaign_id}")
+async def broadcast_resume(campaign_id: int, user: User = Depends(get_current_user)):
+    from broadcast import broadcast_engine
+    return await broadcast_engine.resume_campaign(campaign_id)
+
+
+@app.post("/api/broadcast/cancel/{campaign_id}")
+async def broadcast_cancel(campaign_id: int, user: User = Depends(get_current_user)):
+    from broadcast import broadcast_engine
+    return await broadcast_engine.cancel_campaign(campaign_id)
+
+
 @app.post("/api/manager/message")
 async def manager_message(req: ManagerMessageRequest, user: User = Depends(get_current_user)):
     """Compose + send a message AS the business manager, using ONLY the

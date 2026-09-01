@@ -1,5 +1,6 @@
 """Tests for the ops CLI (cli.py + cli_commands.py) — HTTP mocked, offline-safe."""
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -96,13 +97,19 @@ def test_load_payload_file(tmp_path):
     assert cc.load_payload_file(None) is None
 
 
+def _load_root_cli():
+    """Load the repo-root cli.py explicitly — agent-engine/cli/ (the broadcast
+    package) would otherwise shadow it when tests run from agent-engine/."""
+    import importlib.util
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "cli.py")
+    spec = importlib.util.spec_from_file_location("root_cli", os.path.abspath(path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def test_cli_help_lists_all_commands():
-    import cli
-    for cmd in ("start-server", "generate-report", "run-reengage", "stop-reengage",
-                "list-alerts", "trigger-alerts", "approval-request",
-                "approval-pending", "approval-decision"):
-        assert cmd in cli.__doc__ or True  # doc is informational
-    # The real check: argparse accepts every command with --help
+    cli = _load_root_cli()
     for cmd in ("start-server", "generate-report", "run-reengage", "stop-reengage",
                 "list-alerts", "trigger-alerts", "approval-request",
                 "approval-pending", "approval-decision"):

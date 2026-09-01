@@ -277,3 +277,9 @@ def _json_loads(raw):
 
 # Global instances
 outbound_queue = OutboundQueue()
+
+# Public alias for reuse by import pipelines (broadcast CLI etc.)
+def normalize_phone_number(raw: str) -> str:
+    """Public wrapper around the internal phone normalizer (E.164-ish)."""
+    return _normalize_phone(raw)
+

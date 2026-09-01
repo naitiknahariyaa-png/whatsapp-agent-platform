@@ -833,6 +833,7 @@ def main_menu():
         print(f"  {C.CYAN}9{C.RESET}. Diagnostics")
         print(f"  {C.CYAN}A{C.RESET}. Ops & Jobs (reports/alerts/approvals)")
         print(f"  {C.CYAN}B{C.RESET}. Business Setup (profile + menu form)")
+        print(f"  {C.CYAN}C{C.RESET}. Broadcast Campaigns (bulk import + send)")
         print(f"  {C.CYAN}0{C.RESET}. Exit")
         hr()
 
@@ -860,9 +861,79 @@ def main_menu():
             show_ops_menu()
         elif choice.lower() == "b":
             show_business_setup_menu()
+        elif choice.lower() == "c":
+            show_broadcast_menu()
         elif choice == "0":
             cprint("\nGoodbye! 👋", C.GREEN)
             sys.exit(0)
+
+
+def show_broadcast_menu():
+    """Broadcast Campaigns — bulk import + sequential anti-ban campaigns."""
+    sys.path.insert(0, str(ROOT))
+    import cli_commands as cc
+
+    while True:
+        banner("BROADCAST CAMPAIGNS")
+        hr()
+        print(f"  {C.CYAN}1{C.RESET}. My Lists")
+        print(f"  {C.CYAN}2{C.RESET}. Show List Contents")
+        print(f"  {C.CYAN}3{C.RESET}. Campaign Status")
+        print(f"  {C.CYAN}4{C.RESET}. Pause / Resume / Cancel Campaign")
+        print(f"  {C.CYAN}0{C.RESET}. Back")
+        hr()
+        print("  Import & send are best done from the CLI (large inputs):")
+        print(f"  {C.DIM}python -m cli.broadcast_cli import --file numbers.csv --list-name mylist{C.RESET}")
+        print(f"  {C.DIM}python -m cli.broadcast_cli send --list-name mylist --message \"...\"{C.RESET}")
+        hr()
+        choice = input(f"{C.BOLD}Select: {C.RESET}").strip().lower()
+
+        token = cc.get_token()
+        if choice != "0" and not token:
+            warn("No auth token. Set WAP_TOKEN or WAP_EMAIL + WAP_PASSWORD in .env")
+            return
+        try:
+            if choice == "1":
+                ok, data = cc._call("GET", "/api/broadcast/lists", token)
+                if ok:
+                    for l in (data or {}).get("lists", []):
+                        print(f"  {l['list_name']}: {l['total']} recipients")
+                else:
+                    error(str(data))
+            elif choice == "2":
+                name = input("List name: ").strip()
+                ok, data = cc._call("GET", f"/api/broadcast/list/{name}", token)
+                if ok:
+                    print(f"  {data['list_name']}: {data['total']} recipients")
+                    for m in data.get("members", [])[:50]:
+                        print(f"    {m['phone']}  {m.get('name') or '-'}")
+                else:
+                    error(str(data))
+            elif choice == "3":
+                cid = input("Campaign ID: ").strip()
+                ok, d = cc._call("GET", f"/api/broadcast/status/{cid}", token)
+                if ok:
+                    print(f"  Status: {d['status']} | Sent {d['sent']}/{d['total']} | "
+                          f"Failed {d['failed']} | Skipped {d['skipped']} | "
+                          f"Replies {d['replies']} ({d['reply_rate_pct']}%) | "
+                          f"ETA ~{d['est_minutes_remaining']} min")
+                else:
+                    error(str(data))
+            elif choice == "4":
+                cid = input("Campaign ID: ").strip()
+                action = input("Action (pause/resume/cancel): ").strip().lower()
+                if action in ("pause", "resume", "cancel"):
+                    ok, d = cc._call("POST", f"/api/broadcast/{action}/{cid}", token)
+                    print(d if not ok else f"  -> {d}")
+                else:
+                    warn("Unknown action")
+            elif choice == "0":
+                return
+            else:
+                continue
+        except Exception as e:
+            error(str(e))
+        input("\nPress Enter to continue...")
 
 
 def show_business_setup_menu():
