@@ -321,6 +321,12 @@ class BusinessManager:
                     data = json.load(f)
                 for pid, pdata in data.get("profiles", {}).items():
                     try:
+                        # Coerce enums/complex fields that JSON stores as strings
+                        bt = pdata.get("business_type")
+                        try:
+                            pdata["business_type"] = BusinessType(bt)
+                        except (ValueError, TypeError):
+                            pdata["business_type"] = BusinessType.CUSTOM
                         self.profiles[pid] = BusinessProfile(**pdata)
                     except Exception as e:
                         logger.warning(f"Skipped profile {pid}: {e}")
