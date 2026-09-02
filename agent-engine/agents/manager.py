@@ -12,6 +12,7 @@ Implements the 5-component architecture:
 import asyncio
 import json
 import logging
+import os
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -400,8 +401,26 @@ class Planner:
         # Hardcoded fallback if planner fails
         return self._keyword_fallback(manager_input.message_text)
 
+    # specialist-name -> intent mapping (LLMs often answer in this schema)
+    _SPECIALIST_TO_INTENT = {
+        "concierge": "booking_request",
+        "sales": "sales_inquiry",
+        "salesmaster": "sales_inquiry",
+        "support": "support_question",
+        "billing": "payment",
+        "escalation": "escalation",
+        "marketing": "sales_inquiry",
+        "analytics": "analytics_report",
+    }
+
     def _parse_plan(self, text: str) -> Optional[Plan]:
-        """Parse JSON plan from LLM response."""
+        """Parse JSON plan from LLM response.
+
+        Tolerates two schemas:
+          A) {"intent": "booking_request", "confidence": 0.9, "plan": [{"agent": "concierge", "task": ...}]}
+          B) {"specialist": "concierge", "urgency": "normal", "reasoning": ...,
+              "steps": [{"action": "route_to", "target": "concierge", "context": ...}]}
+        """
         try:
             # Try to find JSON in the response
             json_match = re.search(r'\{.*\}', text, re.DOTALL)
@@ -411,12 +430,30 @@ class Planner:
             data = json.loads(json_match.group(0))
 
             # Validate required fields
-            intent = data.get("intent", "unknown")
-            confidence = float(data.get("confidence", 0.5))
-            plan_steps = data.get("plan", [])
+            urgency = data.get("urgency", "low")
             needs_memory = data.get("needs_memory", [])
             needs_rag = data.get("needs_rag", False)
-            urgency = data.get("urgency", "low")
+
+            raw_steps = data.get("plan") or data.get("steps") or []
+            steps: List[PlanStep] = []
+            for i, s in enumerate(raw_steps):
+                if not isinstance(s, dict):
+                    continue
+                agent_name = s.get("agent") or s.get("target") or s.get("specialist") or "support"
+                task_txt = s.get("task") or s.get("context") or s.get("action") or ""
+                steps.append(PlanStep(step=s.get("step", i + 1), agent=str(agent_name).lower(),
+                                      task=str(task_txt)))
+
+            intent = data.get("intent")
+            if not intent:
+                # Schema B: infer intent from the specialist name
+                specialist = str(data.get("specialist") or
+                                 (steps[0].agent if steps else "")).lower()
+                intent = self._SPECIALIST_TO_INTENT.get(specialist, "unknown")
+
+            # Schema B is an explicit routing decision -> treat as confident
+            default_conf = 0.85 if data.get("specialist") else 0.5
+            confidence = float(data.get("confidence", default_conf))
 
             # Normalize intent
             try:
@@ -424,14 +461,17 @@ class Planner:
             except ValueError:
                 intent_enum = IntentType.UNKNOWN
 
-            steps = [
-                PlanStep(
-                    step=s.get("step", i + 1),
-                    agent=s.get("agent", "support"),
-                    task=s.get("task", ""),
-                )
-                for i, s in enumerate(plan_steps)
-            ]
+            if intent_enum == IntentType.UNKNOWN and not steps:
+                return None  # nothing usable — let caller fall back
+
+            if not steps:
+                # Intent known but no steps: route to the obvious specialist
+                default_agent = {
+                    "booking_request": "concierge", "sales_inquiry": "sales",
+                    "support_question": "support", "payment": "billing",
+                    "escalation": "escalation", "complaint": "escalation",
+                }.get(intent_enum.value, "support")
+                steps = [PlanStep(step=1, agent=default_agent, task="Handle the customer request")]
 
             return Plan(
                 intent=intent_enum.value,
@@ -533,7 +573,10 @@ class Router:
 
     def __init__(self):
         self._specialists: Dict[str, Any] = {}
-        self._default_timeout = 15.0  # seconds
+        # Tool-loop specialists (book/pRAG) make 3-5 LLM calls per turn; on a
+        # hosted LLM that legitimately takes 30-90s. 15s guaranteed timeouts
+        # -> retry -> escalate on every booking. Make it configurable & sane.
+        self._default_timeout = float(os.getenv("SPECIALIST_TIMEOUT", "120"))
 
     def register(self, name: str, agent: Any):
         """Register a specialist agent."""

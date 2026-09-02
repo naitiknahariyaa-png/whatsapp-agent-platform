@@ -80,6 +80,22 @@ class BaseAgent:
                 
                 if tool_name in self.tools:
                     logger.info(f"[{self.name}] Action: {tool_name} {args}")
+                    # Auto-inject conversation context into tool args the tool
+                    # declares but the LLM didn't supply (tenant scoping etc).
+                    try:
+                        declared = {a["name"] for a in
+                                    tool_dispatcher.registry.get(tool_name, {}).get("args", [])}
+                        ctx = context or {}
+                        inject = {
+                            "client_id": ctx.get("client_id", 1),
+                            "phone_number": ctx.get("customer_phone") or ctx.get("phone_number"),
+                            "timezone_str": "Asia/Kolkata",
+                        }
+                        for k, v in inject.items():
+                            if k in declared and k not in args and v is not None:
+                                args[k] = v
+                    except Exception:
+                        pass
                     result = await tool_dispatcher.call(tool_name, **args)
 
                     if isinstance(result, dict) and result.get("status") == "error":

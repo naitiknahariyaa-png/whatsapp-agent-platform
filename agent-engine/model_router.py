@@ -87,21 +87,21 @@ DEFAULT_MODEL_MAP: Dict[TaskType, ModelConfig] = {
     ),
     TaskType.PLANNING: ModelConfig(
         provider="groq",
-        model=os.getenv("PLANNING_MODEL", "llama-3.3-70b-versatile"),
+        model=os.getenv("PLANNING_MODEL", os.getenv("LLM_MODEL", "qwen/qwen3.8-27b")),
         tier=ModelTier.PREMIUM,
         max_tokens=2048,
         temperature=0.2,
     ),
     TaskType.GENERATION: ModelConfig(
         provider="groq",
-        model=os.getenv("GENERATION_MODEL", "llama-3.3-70b-versatile"),
+        model=os.getenv("GENERATION_MODEL", os.getenv("LLM_MODEL", "qwen/qwen3.8-27b")),
         tier=ModelTier.PREMIUM,
         max_tokens=2048,
         temperature=0.5,
     ),
     TaskType.REASONING: ModelConfig(
         provider="groq",
-        model=os.getenv("REASONING_MODEL", "llama-3.3-70b-versatile"),
+        model=os.getenv("REASONING_MODEL", os.getenv("LLM_MODEL", "qwen/qwen3.8-27b")),
         tier=ModelTier.PREMIUM,
         max_tokens=4096,
         temperature=0.2,
@@ -115,7 +115,7 @@ DEFAULT_MODEL_MAP: Dict[TaskType, ModelConfig] = {
     ),
     TaskType.VERIFICATION: ModelConfig(
         provider="groq",
-        model=os.getenv("VERIFICATION_MODEL", "llama-3.3-70b-versatile"),
+        model=os.getenv("VERIFICATION_MODEL", os.getenv("LLM_MODEL", "qwen/qwen3.8-27b")),
         tier=ModelTier.PREMIUM,
         max_tokens=1024,
         temperature=0.1,

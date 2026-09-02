@@ -3852,16 +3852,26 @@ async def list_appointments(client_id: int = 1, date: str = "", user: User = Dep
     async for session in get_session():
         from sqlalchemy import select
         from db import Appointment
+        from crypto_fields import decrypt_value
         query = select(Appointment).where(Appointment.client_id == client_id)
         if date:
             query = query.where(Appointment.appointment_date == date)
         result = await session.execute(query.order_by(Appointment.appointment_date, Appointment.appointment_time))
         appts = result.scalars().all()
+
+        def _dec(v):
+            if v and isinstance(v, str) and v.startswith("gAAAAA"):
+                try:
+                    return decrypt_value(v)
+                except Exception:
+                    return v
+            return v
+
         return {
             "appointments": [
                 {
                     "id": a.id,
-                    "phone_number": a.phone_number,
+                    "phone_number": _dec(a.phone_number),
                     "contact_id": a.contact_id,
                     "title": a.title,
                     "description": a.description,

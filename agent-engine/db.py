@@ -487,6 +487,33 @@ async def register_loop_models():
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _sync_sqlite_columns(conn)
+
+
+async def _sync_sqlite_columns(conn) -> None:
+    """Dev-DB safety net: create_all does NOT add columns to existing SQLite
+    tables, so models that gained fields (e.g. Appointment.phone_hash) fail
+    on flush against an older dev database. Add missing columns idempotently."""
+    from sqlalchemy import text
+    if not str(engine.url).startswith("sqlite"):
+        return
+    for table in Base.metadata.tables.values():
+        rows = (await conn.execute(
+            text(f"PRAGMA table_info({table.name})"))).fetchall()
+        existing = {r[1] for r in rows}
+        if not existing:
+            continue
+        for col in table.columns:
+            if col.name in existing:
+                continue
+            try:
+                coltype = col.type.compile(dialect=engine.dialect)
+            except Exception:
+                coltype = "TEXT"
+            await conn.execute(text(
+                f"ALTER TABLE {table.name} ADD COLUMN {col.name} {coltype}"))
+            logger.info("Added missing column %s.%s (dev DB drift)",
+                        table.name, col.name)
 
 
 async def get_session():
