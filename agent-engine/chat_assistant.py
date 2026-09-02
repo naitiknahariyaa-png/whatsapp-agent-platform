@@ -47,13 +47,26 @@ def build_business_config(business_id: str, profile: Dict[str, Any]) -> Dict[str
 
     # Services/categories from catalog
     categories = []
+    catalog_items = []
     try:
         from business_profiles import business_manager
+        found_catalog = []
         for p in business_manager.profiles.values():
-            if p.id == business_id:
-                catalog = business_manager.get_catalog(p.id)
-                categories = list(set(item.get("category", "") for item in catalog if item.get("category")))
+            if p.id == business_id and getattr(p, "is_active", True):
+                found_catalog = business_manager.get_catalog(p.id) or []
                 break
+        if not found_catalog:
+            # fall back to the client's catalog when id is 'default'
+            for p in business_manager.profiles.values():
+                if getattr(p, "client_id", None) == client_id:
+                    found_catalog = business_manager.get_catalog(p.id) or []
+                    break
+        categories = list(set(item.get("category", "") for item in found_catalog if item.get("category")))
+        catalog_items = [
+            {"name": it.get("name"), "price": it.get("price"),
+             "category": it.get("category"), "available": it.get("is_available", True)}
+            for it in found_catalog[:30]
+        ]
     except Exception:
         pass
 
@@ -70,6 +83,11 @@ def build_business_config(business_id: str, profile: Dict[str, Any]) -> Dict[str
     elif biz_type == "education":
         services = ["Class 1-5", "Class 6-10", "Class 11-12", "JEE/NEET", "Spoken English"]
 
+    # Selling points (explicit or derived)
+    selling_points = profile.get("selling_points") or []
+    if not selling_points and profile.get("description"):
+        selling_points = [profile["description"]]
+
     return {
         "business_name": name,
         "business_type": biz_type,
@@ -77,8 +95,14 @@ def build_business_config(business_id: str, profile: Dict[str, Any]) -> Dict[str
         "hours": hours_str,
         "contact_phone": contact_phone,
         "contact_email": contact_email,
+        "address": profile.get("address", ""),
+        "payment_methods": profile.get("payment_methods", []),
+        "delivery_enabled": profile.get("delivery_enabled", False),
+        "welcome_message": profile.get("welcome_message", ""),
         "categories": categories,
         "services": services,
+        "catalog": catalog_items,
+        "selling_points": selling_points,
         "booking_fields": booking_fields,
     }
 
@@ -138,6 +162,17 @@ Respond ONLY with a single JSON object in this exact shape, nothing else:
   }},
   "reply_to_customer": "the exact message text to show the customer"
 }}"""
+
+
+# ---------------------------------------------------------------------------
+# Speak-as-the-business persona
+# ---------------------------------------------------------------------------
+
+PERSONA_INSTRUCTION = """You are speaking AS the business described below. When a customer
+asks about the business (name, what you sell, prices, hours, how to book), answer confidently
+using the facts given — never say you don't have information about your own business. Only reply
+'let me check with the owner' for facts genuinely not provided.
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -295,27 +330,56 @@ async def process_chat_message(
             "owner_notified": bool
         }
     """
-    # 1. Load business profile
+    # 1. Load business profile — resolve the real owner business when the
+    #    widget sends 'default'/'web' (it does not know its own business id).
     profile = {}
     try:
         from business_profiles import business_manager
-        for p in business_manager.profiles.values():
-            if p.id == business_id:
-                profile = p.to_dict()
-                break
+        active = [p for p in business_manager.profiles.values() if getattr(p, "is_active", True)]
+        # if the client_id maps to a real profile, prefer it (multi-tenant)
+        by_client = next((p for p in active
+                          if getattr(p, "client_id", None) == client_id), None)
+        by_id = next((p for p in active if p.id == business_id), None)
+        resolved = by_id or by_client
+        if resolved is None and len(active) == 1:
+            resolved = active[0]  # single-business fallback
+        if resolved is not None:
+            profile = resolved.to_dict()
+            if business_id not in ("default", "web", ""):
+                pass  # honoured exact id
+            # honour the requested business id even if it differs from client
+            if by_id is not None or business_id in ("default", "web", ""):
+                profile["id"] = profile.get("id") or business_id
     except Exception as e:
         logger.warning("[!] Could not load business profile: %s", e)
 
     if not profile:
         profile = {"id": business_id, "name": "Our Business", "business_type": "general"}
+        try:
+            from business_profiles import business_manager
+            if business_manager.profiles:
+                first = next(iter(business_manager.profiles.values()))
+                profile = first.to_dict()
+        except Exception:
+            pass
 
     # 2. Build prompt
     biz_config = build_business_config(business_id, profile)
+    # Inject the "speak-as-the-business" persona so the widget answers with the
+    # business's real name, services, prices and facts — not a generic reply.
+    persona = ""
+    try:
+        from cli_commands import build_business_system_prompt
+        persona = build_business_system_prompt(profile, catalog=biz_config.get("catalog"))
+    except Exception as e:
+        logger.warning("[!] persona build failed: %s", e)
+    persona_block = f"\n\n{PERSONA_INSTRUCTION}\n{persona}\n" if persona else ""
+
     system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
         business_name=biz_config["business_name"],
         business_type=biz_config["business_type"],
         business_config=render_business_config(biz_config),
-    )
+    ) + persona_block
 
     # 3. Call LLM
     llm_result = await call_chat_llm(system_prompt, customer_message, history)
