@@ -356,6 +356,43 @@ def cmd_persona(token: Optional[str] = None) -> Tuple[bool, Any]:
     return True, prompt
 
 
+def cmd_list_appointments(client_id: Optional[int] = None,
+                          date: Optional[str] = None,
+                          token: Optional[str] = None) -> Tuple[bool, Any]:
+    """List appointments for a business (owner view, phones decrypted server-side)."""
+    params: Dict[str, Any] = {}
+    if client_id:
+        params["client_id"] = client_id
+    if date:
+        params["date"] = date
+    return _call("GET", "/api/appointments", token=token, params=params)
+
+
+def cmd_create_appointment(phone: str, date: str, time: str,
+                           client_id: int, title: str = "Appointment",
+                           duration_minutes: int = 30,
+                           token: Optional[str] = None) -> Tuple[bool, Any]:
+    """Create an appointment via the API (same endpoint the AI slot-filler uses)."""
+    return _call("POST", "/api/appointments", token=token, json_body={
+        "phone_number": phone, "appointment_date": date,
+        "appointment_time": time, "client_id": client_id,
+        "title": title, "duration_minutes": duration_minutes,
+    })
+
+
+def cmd_business_client_id(token: Optional[str] = None) -> Optional[int]:
+    """Resolve the logged-in owner's client_id (from /api/me/business)."""
+    ok, data = get_my_business(token)
+    if ok and isinstance(data, dict):
+        biz = data.get("business") or data
+        cid = biz.get("client_id") or biz.get("id")
+        try:
+            return int(cid)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 def business_setup_interactive(token: Optional[str] = None) -> Tuple[bool, str]:
     """Guided CLI form: owner fills in all business details + menu.
 

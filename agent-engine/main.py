@@ -3915,7 +3915,7 @@ async def create_appointment(request: Request, user: User = Depends(get_current_
             appointment_time=body["appointment_time"],
             duration_minutes=body.get("duration_minutes", 30),
             status=body.get("status", "scheduled"),
-            metadata={
+            sector_metadata={
                 "business_type": body.get("business_type", "general"),
                 "sector_fields": body.get("sector_fields", {}),
             },

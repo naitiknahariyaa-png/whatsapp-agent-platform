@@ -605,23 +605,35 @@ def show_leads_menu():
 
 
 def show_appointments_menu():
+    """Owner view of appointments — live from the API (same data the AI books)."""
+    sys.path.insert(0, str(ROOT))
+    import cli_commands as cc
+
     while True:
-        banner("APPOINTMENTS")
+        banner("APPOINTMENTS (live)")
         hr()
+        token = cc.get_token()
+        if not token:
+            warn("No auth token. Set WAP_TOKEN or WAP_EMAIL + WAP_PASSWORD in .env")
+            return
+        cid = cc.cmd_business_client_id(token)
+        if not cid:
+            error("Could not resolve your client_id. Run Business Setup first (menu B).")
+            return
 
         date = input("Filter by date (YYYY-MM-DD, empty=all): ").strip()
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            appts = loop.run_until_complete(list_appointments(date=date) if date else list_appointments())
-            loop.close()
-        except Exception as e:
-            error(f"Failed: {e}")
+        ok, data = cc.cmd_list_appointments(cid, date or None, token)
+        appts = (data or {}).get("appointments", []) if ok else []
+        if not ok:
+            error(f"Failed to load appointments: {data}")
             appts = []
-
-        for a in appts:
-            print(f"  {a['id']}: {a['phone']} | {a['title'] or '-'} | {a['date'] or '-'} {a['time'] or '-'} | {a['status']}")
-
+        if appts:
+            print(f"  {len(appts)} appointment(s) for client {cid}:")
+            for a in appts:
+                print(f"  #{a['id']}: {a.get('phone_number')} | {a.get('title') or '-'} | "
+                      f"{a.get('appointment_date')} {a.get('appointment_time')} | {a.get('status')}")
+        else:
+            print("  No appointments found.")
         hr()
         print(f"  {C.CYAN}1{C.RESET}. Create Appointment")
         print(f"  {C.CYAN}2{C.RESET}. Refresh")
@@ -632,14 +644,14 @@ def show_appointments_menu():
 
         if choice == "1":
             phone = input("Phone: ").strip() or "919876543210"
-            title = input("Title: ").strip() or "Consultation"
-            date = input("Date (YYYY-MM-DD): ").strip()
-            time = input("Time (HH:MM): ").strip() or "10:00"
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(create_appointment(phone, title, date, time))
-            loop.close()
-            success(f"Appointment created: ID {result.get('id')}")
+            title = input("Title: ").strip() or "Appointment"
+            adate = input("Date (YYYY-MM-DD): ").strip()
+            atime = input("Time (HH:MM): ").strip() or "10:00"
+            ok_c, data_c = cc.cmd_create_appointment(phone, adate, atime, cid, title, token=token)
+            if ok_c:
+                success(f"Appointment created: {json.dumps(data_c, default=str)[:200]}")
+            else:
+                error(str(data_c))
 
         elif choice == "0":
             break
