@@ -258,6 +258,104 @@ def cmd_manager_message(to_phone: str, instruction: str, send: bool,
     return ok, resp
 
 
+def build_business_system_prompt(business: Optional[Dict[str, Any]] = None,
+                                 catalog: Optional[List[Dict[str, Any]]] = None,
+                                 owner_name: Optional[str] = None) -> str:
+    """Build the 'speak-as-the-business' system prompt from a business profile.
+
+    Fills system_prompt_template.txt with real business facts so every AI agent
+    answers customers AS the business itself (real name, services, hours, ...).
+    Falls back gracefully to a generic persona when no profile exists.
+
+    Args:
+        business: dict from GET /api/me/business (profile.to_dict()).
+        catalog:  list of catalog items {'name': ...}.
+        owner_name: owner's display name (from /auth/me), else falls back.
+    """
+    import pathlib
+    b = business or {}
+    items = catalog or []
+    tmpl_path = pathlib.Path(__file__).resolve().parent / "agent-engine" / "system_prompt_template.txt"
+    if not tmpl_path.exists():
+        tmpl_path = pathlib.Path(__file__).resolve().parent / "system_prompt_template.txt"
+    try:
+        tmpl = tmpl_path.read_text(encoding="utf-8")
+    except OSError:
+        tmpl = "You are {business_name}, a {industry} based in {city}."
+
+    # Services (sell-skill) -> prefer explicit 'services', else catalog names,
+    # else description.
+    services = b.get("services")
+    if not isinstance(services, list) or not services:
+        services = [i.get("name") for i in items if i.get("name")]
+    if not services and b.get("description"):
+        services = [b["description"]]
+    services_lines = "\n".join(f"- {s}" for s in services) or "- (list your services via the business-setup form)"
+
+    # Selling points -> explicit list, else derived from description/welcome.
+    selling = b.get("selling_points")
+    if not isinstance(selling, list) or not selling:
+        selling = []
+        if b.get("description"):
+            selling.append(b["description"])
+        if b.get("welcome_message"):
+            selling.append(b["welcome_message"])
+    selling_lines = "\n".join(f"- {s}" for s in selling) or "- (add selling points via the business-setup form)"
+
+    # Location -> best-effort parse from address (city, region).
+    address = (b.get("address") or "").strip()
+    parts = [p.strip() for p in address.split(",") if p.strip()]
+    city = parts[-2] if len(parts) >= 2 else (parts[0] if parts else "your area")
+    region = parts[-1] if len(parts) >= 2 else ""
+    region_suffix = f" ({region})" if region else ""
+
+    # Working hours -> {'summary': 'Mon-Sat 11-9'} or mapping.
+    wh = b.get("working_hours") or {}
+    if isinstance(wh, dict):
+        working_hours = (wh.get("summary")
+                         or ", ".join(f"{k}: {v}" for k, v in wh.items() if k != "summary"))
+    elif isinstance(wh, str):
+        working_hours = wh
+    else:
+        working_hours = ""
+    if not working_hours:
+        working_hours = "not specified"
+
+    payment_methods = ", ".join(b.get("payment_methods") or []) or "cash / UPI"
+    delivery = ("Yes" if b.get("delivery_enabled") else "No")
+    if b.get("delivery_enabled") and b.get("delivery_radius_km"):
+        delivery += f" within {b.get('delivery_radius_km')} km"
+
+    return tmpl.format(
+        business_name=b.get("name") or "our business",
+        industry=b.get("business_type") or "local business",
+        city=city,
+        region_suffix=region_suffix,
+        owner_name=owner_name or b.get("owner_name") or "the owner",
+        contact_email=b.get("contact_email") or "(not set)",
+        contact_phone=b.get("contact_phone") or "(not set)",
+        services=services_lines,
+        selling_points=selling_lines,
+        working_hours=working_hours,
+        payment_methods=payment_methods,
+        delivery=delivery,
+        welcome_message=b.get("welcome_message") or "Welcome!",
+    )
+
+
+def cmd_persona(token: Optional[str] = None) -> Tuple[bool, Any]:
+    """Preview the 'speak-as-the-business' system prompt for the owner."""
+    ok, data = get_my_business(token)
+    if not ok:
+        return False, data
+    biz = (data or {}).get("business") or {}
+    cat = (data or {}).get("catalog") or []
+    if not biz:
+        return False, "No business profile yet. Run: python cli.py business-setup"
+    prompt = build_business_system_prompt(biz, catalog=cat)
+    return True, prompt
+
+
 def business_setup_interactive(token: Optional[str] = None) -> Tuple[bool, str]:
     """Guided CLI form: owner fills in all business details + menu.
 

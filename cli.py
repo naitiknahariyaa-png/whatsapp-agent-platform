@@ -92,6 +92,10 @@ def main(argv=None) -> int:
     s = sub.add_parser("my-business", help="Show your saved business profile and catalog")
     s.add_argument("--token")
 
+    s = sub.add_parser("persona",
+                       help="Preview the AI's 'speak-as-the-business' system prompt built from your profile")
+    s.add_argument("--token")
+
     s = sub.add_parser("manager-message",
                        help="Compose (and optionally send) a WhatsApp message AS your business manager, using ONLY your business profile facts")
     s.add_argument("--to", required=True, help="customer phone, e.g. 919876543210")
@@ -141,6 +145,11 @@ def main(argv=None) -> int:
 
     elif args.command == "my-business":
         ok, data = cc.get_my_business(token)
+
+    elif args.command == "persona":
+        ok, data = cc.cmd_persona(token)
+        print(data)
+        return 0 if ok else 1
 
     elif args.command == "manager-message":
         ok, data = cc.cmd_manager_message(args.to, args.topic, args.send, token)

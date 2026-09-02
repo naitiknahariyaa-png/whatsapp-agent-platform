@@ -346,6 +346,15 @@ class AgentOrchestrator:
         self._vertical_cache: dict = {}
         self._manager_agents: dict = {}  # per-client_id manager agents (business-aware)
 
+    def _biz_system_prompt(self, ctx: dict) -> str:
+        """Build the 'speak-as-the-business' persona from the profile context."""
+        try:
+            from cli_commands import build_business_system_prompt
+            return build_business_system_prompt(ctx)
+        except Exception as e:
+            logger.debug("business persona prompt build failed: %s", e)
+            return ""
+
     def _get_manager_agent(self, client_id: int = 1):
         profile = self._biz_profile(client_id)
         biz_name = (profile or {}).get("name") or "Our Business"
@@ -395,6 +404,11 @@ class AgentOrchestrator:
                             ]
                     except Exception:
                         pass
+                    # Canonical aliases so the persona builder recognises them
+                    ctx.setdefault("contact_phone", ctx.get("phone", ""))
+                    ctx.setdefault("contact_email", ctx.get("email", ""))
+                    ctx.setdefault("delivery_enabled", ctx.get("delivery") is True)
+                    ctx["system_prompt"] = self._biz_system_prompt(ctx)
                     return ctx
         except Exception:
             return None

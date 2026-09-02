@@ -40,11 +40,16 @@ class BaseAgent:
         # answer from the owner's real data instead of claiming no access.
         biz_ctx = (context or {}).get("business_context") or {}
         biz_block = ""
-        if biz_ctx:
+        biz_sys = biz_ctx.get("system_prompt") if isinstance(biz_ctx, dict) else None
+        if biz_sys:
+            # Full "speak-as-the-business" persona built from the real profile
+            biz_block = "\n\n" + str(biz_sys)
+        elif biz_ctx:
             biz_block = (
                 "\n\n### BUSINESS FACTS (authoritative — answer customers ONLY "
                 "from these facts; never say you don't have access to them):\n"
-                + json.dumps(biz_ctx, ensure_ascii=False, default=str)
+                + json.dumps({k: v for k, v in biz_ctx.items() if k != "system_prompt"},
+                             ensure_ascii=False, default=str)
             )
 
         messages = [
