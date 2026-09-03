@@ -35,7 +35,7 @@ async function forwardToAgent(event, data) {
     const signature = crypto.createHmac('sha256', WA_BRIDGE_SECRET).update(signedPayload).digest('hex');
     const resp = await axios.post(AGENT_API_URL + '/api/webhook', body, {
       headers: { 'Content-Type': 'application/json', 'X-Bridge-Signature': signature, 'X-Bridge-Timestamp': timestamp },
-      timeout: 10000,
+      timeout: 180000,
     });
     if (resp.status >= 200 && resp.status < 300) return resp.data;
   } catch (err) {
