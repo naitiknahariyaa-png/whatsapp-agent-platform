@@ -43,6 +43,42 @@ class LeadGenAgent:
             "What exactly are you looking for?"
         ]
 
+    def build_system_prompt(self, client_id: int = 1) -> str:
+        """Return the advanced, per-client system prompt for this business.
+
+        Uses prompt_builder (loads the real business profile for client_id and
+        builds the persona + knowledge base + guardrails + tone + goal). Falls
+        back to a safe generic prompt when no profile exists.
+        """
+        from prompt_builder import build_system_prompt_for_client
+        return build_system_prompt_for_client(client_id)
+
+    async def respond_with_llm(self, message: str, client_id: int = 1) -> str:
+        """Optionally answer a customer message with the business-aware LLM.
+
+        Convenience wrapper for flows that call the LLM directly (e.g. the
+        first touch on a new WhatsApp conversation). Splices the per-client
+        advanced system prompt into the request every time.
+        """
+        from llm_setup import get_llm
+        system_prompt = self.build_system_prompt(client_id)
+        llm = get_llm()
+        try:
+            res = await llm.ainvoke([
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": message},
+            ])
+            return res.content if hasattr(res, "content") else str(res)
+        except Exception:
+            try:
+                res = await llm.generate([
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": message},
+                ])
+                return res.get("content", "")
+            except Exception as e:
+                return f"I'm having trouble thinking right now. ({e})"
+
     async def receive_meta_webhook(self, payload: Dict[str, Any], client_id: int = 1) -> Dict:
         """Receive Meta webhook for Click-to-WhatsApp Ad leads"""
         try:

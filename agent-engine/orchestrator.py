@@ -348,12 +348,42 @@ class AgentOrchestrator:
 
     def _biz_system_prompt(self, ctx: dict) -> str:
         """Build the 'speak-as-the-business' persona from the profile context."""
+        # 1) Preferred: the advanced, per-client builder (inline profile dict).
+        try:
+            from prompt_builder import build_advanced_system_prompt, _industry_label, _extract_city
+            catalog = ctx.get("catalog", [])
+            services = [c.get("name") for c in catalog if c.get("name")] \
+                or ([ctx.get("description", "")] if ctx.get("description") else [])
+            pricing = [
+                f"{c.get('name')} - {ctx.get('currency','INR')} {c.get('price', 0)}"
+                for c in catalog if c.get("name")
+            ]
+            advanced = build_advanced_system_prompt({
+                "business_name": ctx.get("name") or "this business",
+                "industry": _industry_label(ctx.get("business_type", "general")),
+                "city": _extract_city(ctx.get("address", "")),
+                "services": services,
+                "pricing": pricing,
+                "selling_points": [ctx["description"]] if ctx.get("description") else [],
+                "tone": "friendly and professional",
+                "contact_phone": ctx.get("contact_phone") or ctx.get("phone") or "",
+                "contact_email": ctx.get("contact_email") or ctx.get("email") or "",
+                "address": ctx.get("address", ""),
+                "working_hours": ctx.get("working_hours", ""),
+                "payment_methods": ctx.get("payment_methods", []) or [],
+            })
+            return advanced
+        except Exception as e:
+            logger.debug("advanced persona prompt build failed: %s", e)
+
+        # 2) Fallback: persona-template builder.
         try:
             from cli_commands import build_business_system_prompt
             return build_business_system_prompt(ctx)
         except Exception as e:
             logger.debug("business persona prompt build failed: %s", e)
             return ""
+
 
     def _get_manager_agent(self, client_id: int = 1):
         profile = self._biz_profile(client_id)
