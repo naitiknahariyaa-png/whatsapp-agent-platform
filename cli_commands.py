@@ -103,6 +103,20 @@ def _is_port_in_use(port: int) -> bool:
         except OSError:
             return True
 
+def cmd_toggle_subscription(client_id: int, status: bool, token: Optional[str] = None):
+    """Turn a client's AI subscription on/off (admin).
+
+    Off  -> customers get: "This business's AI assistant is temporarily
+            offline. Please contact the business owner directly."
+    """
+    return _call("POST", f"/api/admin/clients/{client_id}/subscription",
+                 token=token, json_body={"is_active": bool(status)})
+
+
+def cmd_get_subscription(client_id: int, token: Optional[str] = None):
+    return _call("GET", f"/api/admin/clients/{client_id}/subscription", token=token)
+
+
 def cmd_start_server(port: int = 8000) -> Tuple[bool, str]:
     """Start the FastAPI backend (uvicorn) detached.
     If the port is already in use, assume the server is running and return success.

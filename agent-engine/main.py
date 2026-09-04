@@ -4721,6 +4721,47 @@ async def admin_alerts(user: User = Depends(require_admin)):
 
 
 @app.get("/api/admin/bridge-status")
+
+
+@app.post("/api/admin/clients/{client_id}/subscription")
+async def admin_set_subscription(client_id: int, body: dict,
+                                 user: User = Depends(require_admin)):
+    """Toggle a client's subscription (admin only).
+
+    Body: {"is_active": true|false}
+    Inactive clients' customers get the offline message instead of the AI.
+    """
+    is_active = bool(body.get("is_active"))
+    from db import async_session, Client
+    from sqlalchemy import select
+    async with async_session() as session:
+        res = await session.execute(select(Client).where(Client.id == int(client_id)))
+        client = res.scalar_one_or_none()
+        if not client:
+            raise HTTPException(status_code=404, detail=f"Client {client_id} not found")
+        client.is_active = is_active
+        await session.commit()
+        return {"status": "ok", "client_id": client_id,
+                "business_name": client.business_name,
+                "is_active": client.is_active}
+
+
+@app.get("/api/admin/clients/{client_id}/subscription")
+async def admin_get_subscription(client_id: int, user: User = Depends(require_admin)):
+    """Read a client's subscription status (admin only)."""
+    from db import async_session, Client
+    from sqlalchemy import select
+    async with async_session() as session:
+        res = await session.execute(select(Client).where(Client.id == int(client_id)))
+        client = res.scalar_one_or_none()
+        if not client:
+            raise HTTPException(status_code=404, detail=f"Client {client_id} not found")
+        return {"status": "ok", "client_id": client_id,
+                "business_name": client.business_name,
+                "is_active": bool(client.is_active)}
+
+
+@app.get("/api/admin/bridge-status")
 async def admin_bridge_status(user: User = Depends(require_admin)):
     """Detailed WhatsApp bridge status (admin only)."""
     try:

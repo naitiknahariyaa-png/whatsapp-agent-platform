@@ -462,6 +462,19 @@ class AgentOrchestrator:
 
         async for session in get_session():
             await save_message(session, phone_number, message, direction="incoming", client_id=client_id)
+
+            # ── Subscription gate: skip the AI entirely for inactive clients ──
+            from sqlalchemy import select as _sa_select
+            from db import Client as _Client
+            cres = await session.execute(
+                _sa_select(_Client.is_active).where(_Client.id == int(client_id)))
+            active = cres.scalar_one_or_none()
+            if active is False:
+                logger.info("client %s is inactive (subscription off) - AI skipped for %s",
+                            client_id, phone_number)
+                return ("This business's AI assistant is temporarily offline. "
+                        "Please contact the business owner directly.")
+
             history = await get_conversation_history(session, phone_number, limit=10, client_id=client_id)
             history_dicts = [{"content": h.content, "direction": h.direction,
                               "created_at": h.created_at.isoformat()} for h in history]

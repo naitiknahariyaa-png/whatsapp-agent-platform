@@ -13,6 +13,7 @@ Usage:
   python cli.py approval-pending
   python cli.py approval-decision --id <request-id> --approve|--reject [--comment "..."]
   python cli.py business-setup          # guided form: business details + menu
+  python cli.py toggle-subscription <client_id> on|off   # admin: AI subscription
   python cli.py my-business             # show saved business profile + catalog
 
 Auth: set WAP_TOKEN, or WAP_EMAIL + WAP_PASSWORD (auto-login).
@@ -92,6 +93,12 @@ def main(argv=None) -> int:
     s = sub.add_parser("my-business", help="Show your saved business profile and catalog")
     s.add_argument("--token")
 
+    s = sub.add_parser("toggle-subscription",
+                       help="Admin: enable/disable a client's AI (subscription switch)")
+    s.add_argument("client_id", type=int)
+    s.add_argument("state", choices=["on", "off"])
+    s.add_argument("--token")
+
     s = sub.add_parser("persona",
                        help="Preview the AI's 'speak-as-the-business' system prompt built from your profile")
     s.add_argument("--token")
@@ -142,6 +149,10 @@ def main(argv=None) -> int:
         if not ok:
             print(data, file=sys.stderr)
         return 0 if ok else 1
+
+    elif args.command == "toggle-subscription":
+        ok, data = cc.cmd_toggle_subscription(
+            args.client_id, args.state == "on", token)
 
     elif args.command == "my-business":
         ok, data = cc.get_my_business(token)
