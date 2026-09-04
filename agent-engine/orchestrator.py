@@ -474,6 +474,22 @@ class AgentOrchestrator:
                     logger.info("human takeover active for %s", phone_number)
                     return ""
 
+            # ── Instant fast path (Phase 1-4): complete Hinglish bookings/orders
+            #    skip the multi-second LLM loop entirely.
+            try:
+                from services.instant_actions import try_instant_action
+                instant_reply, _slots = await try_instant_action(
+                    phone_number, message, client_id, self._biz_profile(client_id))
+                if instant_reply:
+                    logger.info("instant action handled message for %s (client %s)",
+                                phone_number, client_id)
+                    await self._finalize_turn(session, phone_number, message, instant_reply,
+                                              client_id, sm, history_dicts, contact_dict,
+                                              lang, metrics_collector, usage_meter)
+                    return instant_reply
+            except Exception as e:
+                logger.warning("instant action path failed (falling through to agents): %s", e)
+
             # Try Manager Agent first
             manager_agent = self._get_manager_agent(client_id)
             if manager_agent is not None:
