@@ -78,7 +78,7 @@ function createClient() {
   return new Client({
     authStrategy: new LocalAuth({ dataPath: path.join(__dirname, '.wwebjs_auth') }),
     puppeteer: puppeteerOptions,
-    qrMaxRetries: 3,
+    qrMaxRetries: 10,
     takeoverOnConflict: true,
   });
 }
@@ -248,6 +248,50 @@ app.get('/qr', (req, res) => {
 app.post('/qr/refresh', async (req, res) => {
   const result = await refreshQr();
   res.json(result);
+});
+
+const QR_PAGE = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhatsApp Agent — Scan QR</title>
+<style>
+ body{font-family:system-ui,sans-serif;background:#0f1419;color:#e7e9ea;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center}
+ .card{background:#192734;border:16px solid #fff;border-radius:20px;padding:24px;box-shadow:0 10px 40px rgba(0,0,0,.4);max-width:380px}
+ h1{font-size:22px;margin:0 0 6px} p.sub{color:#8899a6;font-size:14px;margin:0 0 20px}
+ img.qr{width:280px;height:280px;border-radius:12px;background:#fff}
+ .msg{margin-top:18px;font-size:15px;min-height:22px}
+ .connected{color:#00ba7c;font-weight:600} .waiting{color:#ffad1f}
+ button{margin-top:14px;background:#25d366;color:#000;border:0;border-radius:24px;padding:10px 22px;font-size:15px;font-weight:600;cursor:pointer}
+ button:hover{background:#1da851} .hidden{display:none}
+</style></head>
+<body>
+ <div class="card">
+   <h1>📱 Scan to Connect</h1>
+   <p class.sub">Open WhatsApp → Linked Devices → Link a Device</p>
+   <img id="qr" class="qr" alt="QR code">
+   <div id="msg" class="msg waiting">Loading QR…</div>
+   <button id="refresh" onclick="load()">↻ Refresh QR</button>
+ </div>
+ <script>
+   const $=id=>document.getElementById(id);
+   async function load(){
+     try{
+       const r=await fetch('/qr'); const j=await r.json();
+       if(j.status==='connected'){$('qr').classList.add('hidden');$('msg').textContent='✅ Connected! You can close this tab.';$('msg').className='msg connected';$('refresh').classList.add('hidden');return;}
+       if(j.data_url){$('qr').src=j.data_url;$('msg').textContent='Scan me with WhatsApp';$('msg').className='msg waiting';}
+       else if(j.status==='refreshing'){$('msg').textContent='Refreshing…';}
+       else{$('msg').textContent=j.message||'Waiting for QR…';}
+     }catch(e){$('msg').textContent='Bridge unreachable: '+e.message;}
+   }
+   load(); setInterval(load, 20000);
+ </script>
+</body></html>`;
+
+app.get('/', (req, res) => res.type('html').send(QR_PAGE));
+
+app.get('/status', (req, res) => {
+  res.json({ connected: isConnected, connection_state: connectionState, whatsapp: whatsappInfo || {} });
 });
 
 app.post('/send', async (req, res) => {
