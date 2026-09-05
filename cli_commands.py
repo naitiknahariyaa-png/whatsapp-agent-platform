@@ -407,6 +407,81 @@ def cmd_business_client_id(token: Optional[str] = None) -> Optional[int]:
     return None
 
 
+# ── Lead & Order CLI (Section: Lead Visibility + Order Processing) ─────────────
+
+def _fmt_table(headers, rows):
+    """Simple fixed-width table (no tabulate dependency)."""
+    if not rows:
+        return "(no rows)"
+    widths = [max(len(str(h)), max((len(str(r[i])) for r in rows), default=0)) for i, h in enumerate(headers)]
+    fmt = " | ".join(f"{{:<{w}}}" for w in widths)
+    out = [fmt.format(*headers), "-+-".join("-" * w for w in widths)]
+    for r in rows:
+        out.append(fmt.format(*[str(x) for x in r]))
+    return "\n".join(out)
+
+
+def cmd_list_leads(client_id: int, status: str = "", token: Optional[str] = None):
+    """List leads for a shop, optional status filter."""
+    params = {"client_id": client_id}
+    if status:
+        params["status"] = status
+    return _call("GET", f"/clients/{client_id}/leads", token=token, params=params)
+
+
+def cmd_view_lead(client_id: int, lead_id: int, token: Optional[str] = None):
+    """Print the full message thread for a lead."""
+    ok, data = _call("GET", f"/clients/{client_id}/leads/{lead_id}/messages", token=token)
+    return ok, data
+
+
+def cmd_mark_lead(client_id: int, lead_id: int, status: str, token: Optional[str] = None):
+    """Mark a lead status."""
+    return _call("PATCH", f"/clients/{client_id}/leads/{lead_id}/status",
+                 token=token, json_body={"status": status})
+
+
+def cmd_create_order(client_id: int, lead_id: int, amount: float,
+                     currency: str = "INR", description: str = "", token: Optional[str] = None):
+    """Create an order from a lead."""
+    return _call("POST", f"/clients/{client_id}/leads/{lead_id}/order",
+                 token=token, json_body={"amount": amount, "currency": currency, "description": description})
+
+
+def cmd_list_orders(client_id: int, status: str = "", token: Optional[str] = None):
+    params = {}
+    if status:
+        params["status"] = status
+    return _call("GET", f"/clients/{client_id}/orders", token=token, params=params)
+
+
+def cmd_upload_profile(client_id: int, path: str, token: Optional[str] = None):
+    """Validate a profile JSON file and store it in Client.business_profile."""
+    p = Path(path)
+    if not p.exists():
+        return False, f"File not found: {path}"
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:
+        return False, f"Invalid JSON: {e}"
+    # minimal schema check
+    if not isinstance(data, dict):
+        return False, "Profile JSON must be an object"
+    allowed_keys = {"name", "business_type", "description", "address", "contact_phone",
+                    "contact_email", "website", "working_hours", "payment_methods",
+                    "delivery_enabled", "currency", "language", "welcome_message",
+                    "services", "menu", "pricing", "selling_points", "tone", "brand_voice"}
+    cleaned = {k: v for k, v in data.items() if k in allowed_keys}
+    return _call("PATCH", f"/api/admin/clients/{client_id}/profile",
+                 token=token, json_body=cleaned)
+
+
+def cmd_admin_overview(token: Optional[str] = None):
+    """Platform-wide stats (admin only)."""
+    return _call("GET", "/api/admin/overview", token=token)
+
+
+
 def business_setup_interactive(token: Optional[str] = None) -> Tuple[bool, str]:
     """Guided CLI form: owner fills in all business details + menu.
 

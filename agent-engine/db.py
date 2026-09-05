@@ -82,6 +82,7 @@ class Client(Base):
     whatsapp_number: Mapped[str] = mapped_column(String(20), unique=True, index=True)
     plan: Mapped[str] = mapped_column(String(20), default="trial")  # trial/basic/pro
     is_active: Mapped[bool] = mapped_column(default=True)
+    business_profile: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)  # menu/services/pricing/brand-voice for per-shop LLM prompt
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -794,6 +795,140 @@ async def create_dead_letter_job(session, task_name: str, args: list, kwargs: di
     session.add(job)
     await session.commit()
     return job
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Lead → Order pipeline (Lead Visibility + Order Processing)
+# ──────────────────────────────────────────────────────────────────────
+
+class Order(Base):
+    """A sale/order converted from a lead/contact."""
+    __tablename__ = "orders"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True)
+    contact_id: Mapped[Optional[int]] = mapped_column(ForeignKey("contacts.id"), index=True)
+    lead_id: Mapped[Optional[int]] = mapped_column(ForeignKey("contacts.id"), index=True)
+    amount: Mapped[float] = mapped_column(Float, default=0.0)
+    currency: Mapped[str] = mapped_column(String(10), default="INR")
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    description: Mapped[Optional[str]] = mapped_column(String(255))
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self) -> Dict:
+        return {
+            "id": self.id, "client_id": self.client_id, "contact_id": self.contact_id,
+            "lead_id": self.lead_id, "amount": self.amount, "currency": self.currency,
+            "status": self.status, "description": self.description, "notes": self.notes,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+async def get_client_by_whatsapp_number(whatsapp_number: str) -> Optional[Client]:
+    """Resolve a client_id from a WhatsApp number (bridge uses this on inbound)."""
+    async with async_session() as session:
+        res = await session.execute(
+            select(Client).where(Client.whatsapp_number == whatsapp_number))
+        return res.scalar_one_or_none()
+
+
+async def list_leads(client_id: int, status: str = "", limit: int = 50, offset: int = 0) -> List[Dict]:
+    """Paginated leads (contacts) for a client, optionally filtered by lead_status."""
+    async with async_session() as session:
+        query = select(Contact).where(Contact.client_id == client_id)
+        if status:
+            query = query.where(Contact.lead_status == status)
+        query = query.order_by(Contact.updated_at.desc()).offset(offset).limit(limit)
+        rows = (await session.execute(query)).scalars().all()
+        return [{
+            "id": c.id, "name": c.name, "phone": c.phone_number,
+            "email": c.email, "tags": c.tags or [], "notes": c.notes,
+            "lead_score": c.lead_score, "lead_status": c.lead_status,
+            "source": c.source, "created_at": c.created_at.isoformat() if c.created_at else None,
+            "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+        } for c in rows]
+
+
+async def get_lead_messages(client_id: int, contact_id: int, limit: int = 100) -> List[Dict]:
+    """Full message thread for a lead, scoped to the client (tenant-safe)."""
+    async with async_session() as session:
+        res = await session.execute(
+            select(Message).where(
+                Message.client_id == client_id,
+                Message.phone_hash == select(Contact.phone_hash).where(
+                    Contact.id == contact_id, Contact.client_id == client_id).scalar_subquery(),
+            ).order_by(Message.created_at.asc()).limit(limit))
+        rows = res.scalars().all()
+        return [{
+            "id": m.id, "direction": m.direction, "content": m.content,
+            "message_type": m.message_type, "status": m.status,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        } for m in rows]
+
+
+async def update_lead_status(client_id: int, contact_id: int, status: str) -> Optional[Contact]:
+    """Mark a lead: new/contacted/qualified/won/lost. Tenant-scoped."""
+    allowed = {"new", "contacted", "qualified", "won", "lost"}
+    if status not in allowed:
+        raise ValueError(f"status must be one of {allowed}")
+    async with async_session() as session:
+        res = await session.execute(
+            select(Contact).where(Contact.id == contact_id, Contact.client_id == client_id))
+        contact = res.scalar_one_or_none()
+        if contact:
+            contact.lead_status = status
+            contact.updated_at = datetime.now(timezone.utc)
+            await session.commit()
+            await session.refresh(contact)
+        return contact
+
+
+async def create_order(client_id: int, contact_id: int, amount: float,
+                       currency: str = "INR", description: str = "", notes: str = "") -> Order:
+    """Convert a lead into an order/sale (link back to contact/lead)."""
+    async with async_session() as session:
+        order = Order(
+            client_id=client_id, contact_id=contact_id, lead_id=contact_id,
+            amount=amount, currency=currency, status="pending",
+            description=description, notes=notes,
+        )
+        session.add(order)
+        await session.commit()
+        await session.refresh(order)
+        return order
+
+
+async def get_orders(client_id: int, status: str = "", limit: int = 50) -> List[Dict]:
+    """Orders for a client, optional status filter."""
+    async with async_session() as session:
+        query = select(Order).where(Order.client_id == client_id)
+        if status:
+            query = query.where(Order.status == status)
+        query = query.order_by(Order.created_at.desc()).limit(limit)
+        return [o.to_dict() for o in (await session.execute(query)).scalars().all()]
+
+
+async def admin_overview() -> Dict:
+    """Platform-wide stats for the multi-tenant admin dashboard."""
+    from sqlalchemy import func
+    async with async_session() as session:
+        total_clients = (await session.execute(select(func.count(Client.id)))).scalar() or 0
+        active_clients = (await session.execute(
+            select(func.count(Client.id)).where(Client.is_active.is_(True)))).scalar() or 0
+        total_leads = (await session.execute(select(func.count(Contact.id)))).scalar() or 0
+        total_orders = (await session.execute(select(func.count(Order.id)))).scalar() or 0
+        paid = (await session.execute(
+            select(func.coalesce(func.sum(Order.amount), 0)).where(Order.status == "paid"))).scalar() or 0
+        return {
+            "total_clients": int(total_clients),
+            "active_clients": int(active_clients),
+            "inactive_clients": int(total_clients - active_clients),
+            "total_leads": int(total_leads),
+            "total_orders": int(total_orders),
+            "monthly_revenue": float(paid),
+        }
 
 
 async def create_indexes():

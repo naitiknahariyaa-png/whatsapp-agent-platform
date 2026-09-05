@@ -112,6 +112,44 @@ def main(argv=None) -> int:
                    help="actually send via WhatsApp (default: only compose and print)")
     s.add_argument("--token")
 
+    # ── Lead & Order CLI ──────────────────────────────────────────────────────
+    s = sub.add_parser("list-leads", help="List leads for a shop (optional --status filter)")
+    s.add_argument("client_id", type=int)
+    s.add_argument("--status", default="", help="new|contacted|qualified|won|lost")
+    s.add_argument("--token")
+
+    s = sub.add_parser("view-lead", help="Show full message thread for a lead")
+    s.add_argument("client_id", type=int)
+    s.add_argument("lead_id", type=int)
+    s.add_argument("--token")
+
+    s = sub.add_parser("mark-lead", help="Update lead status")
+    s.add_argument("client_id", type=int)
+    s.add_argument("lead_id", type=int)
+    s.add_argument("--status", required=True, help="new|contacted|qualified|won|lost")
+    s.add_argument("--token")
+
+    s = sub.add_parser("create-order", help="Convert a lead into an order/sale")
+    s.add_argument("client_id", type=int)
+    s.add_argument("lead_id", type=int)
+    s.add_argument("--amount", type=float, required=True)
+    s.add_argument("--currency", default="INR")
+    s.add_argument("--description", default="")
+    s.add_argument("--token")
+
+    s = sub.add_parser("list-orders", help="List orders for a shop")
+    s.add_argument("client_id", type=int)
+    s.add_argument("--status", default="")
+    s.add_argument("--token")
+
+    s = sub.add_parser("upload-profile", help="Upload a business profile JSON (onboarding / custom-agent training)")
+    s.add_argument("client_id", type=int)
+    s.add_argument("path", help="path/to/profile.json")
+    s.add_argument("--token")
+
+    s = sub.add_parser("admin-overview", help="Platform-wide stats (admin only)")
+    s.add_argument("--token")
+
     args = p.parse_args(argv)
 
     if args.command == "start-server":
@@ -171,6 +209,22 @@ def main(argv=None) -> int:
             if data.get("send_error"):
                 print(f"\n[!] {data['send_error']}", file=sys.stderr)
             return 0
+
+    elif args.command == "list-leads":
+        ok, data = cc.cmd_list_leads(args.client_id, args.status, token)
+    elif args.command == "view-lead":
+        ok, data = cc.cmd_view_lead(args.client_id, args.lead_id, token)
+    elif args.command == "mark-lead":
+        ok, data = cc.cmd_mark_lead(args.client_id, args.lead_id, args.status, token)
+    elif args.command == "create-order":
+        ok, data = cc.cmd_create_order(
+            args.client_id, args.lead_id, args.amount, args.currency, args.description, token)
+    elif args.command == "list-orders":
+        ok, data = cc.cmd_list_orders(args.client_id, args.status, token)
+    elif args.command == "upload-profile":
+        ok, data = cc.cmd_upload_profile(args.client_id, args.path, token)
+    elif args.command == "admin-overview":
+        ok, data = cc.cmd_admin_overview(token)
 
     else:  # pragma: no cover
         p.print_help()

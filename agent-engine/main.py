@@ -360,6 +360,14 @@ try:
 except Exception as _e:
     logger.warning(f"[!] Failed to mount onboarding router: {_e}")
 
+# Lead visibility, order processing, multi-tenant admin (Section 3-4)
+try:
+    from api.leads import router as leads_router
+    app.include_router(leads_router)
+    logger.info("[v] Leads/orders/admin router mounted at /api")
+except Exception as _e:
+    logger.warning(f"[!] Failed to mount leads router: {_e}")
+
 # Mount frontend static files (disabled in terminal-only mode)
 _FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
 if not os.getenv("WAP_TERMINAL_MODE") and os.path.exists(_FRONTEND_DIR):
@@ -813,6 +821,11 @@ async def webhook(request: Request):
     if phone_number and (message or media_data):
         orchestrator: AgentOrchestrator = app.state.orchestrator
         reply = await orchestrator.process_message(phone_number, message, client_id, media_data, media_mimetype)
+        # Bridge hook: capture lead + notify owner (subscription gate inside)
+        try:
+            await post_process_incoming(client_id, phone_number, message, from_name=data.get("from_name", ""))
+        except Exception as e:
+            logger.warning("post_process_incoming failed: %s", e)
         # 1.7 Push real-time notification to owner dashboard
         try:
             await manager.broadcast(client_id, {
@@ -827,6 +840,79 @@ async def webhook(request: Request):
         return {"status": "ok", "reply": reply}
 
     return {"status": "ok", "message": "webhook received"}
+
+
+# ── Bridge hook: lead capture + owner notification (Section 3/4) ──────────────
+
+async def _resolve_client_id(data: dict, phone_number: str) -> int:
+    """Resolve tenant client_id: explicit → env → single active profile."""
+    client_id = data.get("client_id")
+    if client_id:
+        return int(client_id)
+    try:
+        from business_profiles import business_manager
+        active = [p for p in business_manager.profiles.values() if getattr(p, "is_active", True)]
+        if len(active) == 1:
+            return active[0].client_id
+    except Exception:
+        pass
+    return int(os.getenv("DEFAULT_CLIENT_ID", "1"))
+
+
+async def _upsert_lead(client_id: int, phone_number: str, name: str = ""):
+    """Find-or-create a Contact (lead) for this tenant + phone."""
+    from crypto_fields import hmac_phone_hash
+    phone_hash = hmac_phone_hash(phone_number) if phone_number else None
+    async with async_session() as session:
+        query = select(Contact).where(Contact.client_id == client_id)
+        if phone_hash:
+            query = query.where(Contact.phone_hash == phone_hash)
+        contact = (await session.execute(query)).scalar_one_or_none()
+        if not contact:
+            contact = Contact(
+                client_id=client_id, phone_number=phone_number, phone_hash=phone_hash,
+                name=name or "", lead_status="new", source="whatsapp",
+            )
+            session.add(contact)
+            await session.commit()
+            await session.refresh(contact)
+            return contact, True  # created
+        if name and not contact.name:
+            contact.name = name
+            await session.commit()
+        return contact, False
+
+
+async def _notify_owner_new_lead(client_id: int, contact: "Contact", message: str):
+    """Push a real-time 'new lead' template notification to the shop owner."""
+    try:
+        await manager.broadcast(client_id, {
+            "type": "new_lead_message",
+            "lead_id": contact.id,
+            "phone": contact.phone_number,
+            "name": contact.name or "",
+            "message": message[:300],
+            "lead_status": contact.lead_status,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception:
+        pass
+
+
+async def post_process_incoming(client_id: int, phone_number: str, message: str, from_name: str = ""):
+    """Bridge hook: check subscription, capture lead, notify owner. Call AFTER process_message."""
+    from sqlalchemy import select
+    from db import Client
+    # 1) subscription gate at the DB level (defense in depth alongside orchestrator gate)
+    async with async_session() as session:
+        client = (await session.execute(select(Client).where(Client.id == client_id))).scalar_one_or_none()
+        if client and not client.is_active:
+            return {"active": False}
+    # 2) capture / touch the lead
+    contact, created = await _upsert_lead(client_id, phone_number, from_name)
+    # 3) notify owner in real time
+    await _notify_owner_new_lead(client_id, contact, message)
+    return {"active": True, "lead_id": contact.id, "lead_created": created}
 
 
 @app.post("/api/webhook")
