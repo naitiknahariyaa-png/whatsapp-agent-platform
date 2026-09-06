@@ -366,7 +366,15 @@ try:
     app.include_router(leads_router)
     logger.info("[v] Leads/orders/admin router mounted at /api")
 except Exception as _e:
-    logger.warning(f"[!] Failed to mount leads router: {_e}")
+    logger.warning("[!] Leads/orders router not mounted: %s", _e)
+
+# Server-rendered owner dashboard (FastAPI + Jinja2, /admin/dashboard)
+try:
+    from api.dashboard import router as dashboard_router
+    app.include_router(dashboard_router)
+    logger.info("[v] Owner dashboard mounted at /admin/dashboard")
+except Exception as _e:
+    logger.warning("[!] Dashboard router not mounted: %s", _e)
 
 # Mount frontend static files (disabled in terminal-only mode)
 _FRONTEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend"))
@@ -805,6 +813,12 @@ async def webhook(request: Request):
     media_data = data.get("mediaData")
     media_mimetype = data.get("mediaMimetype")
 
+    # D5: owner commands typed from the business's own WhatsApp number
+    # (bridge forwards fromMe messages like "order 12 499" / "mark 12 won").
+    if data.get("from_me"):
+        result = await handle_owner_command(client_id, phone_number, message)
+        return {"status": "ok", **result}
+
     # Compliance: check opt-out
     try:
         from services.compliance import compliance_manager
@@ -862,6 +876,8 @@ async def _resolve_client_id(data: dict, phone_number: str) -> int:
 async def _upsert_lead(client_id: int, phone_number: str, name: str = ""):
     """Find-or-create a Contact (lead) for this tenant + phone."""
     from crypto_fields import hmac_phone_hash
+    from db import async_session
+    from sqlalchemy import select
     phone_hash = hmac_phone_hash(phone_number) if phone_number else None
     async with async_session() as session:
         query = select(Contact).where(Contact.client_id == client_id)
@@ -913,6 +929,74 @@ async def post_process_incoming(client_id: int, phone_number: str, message: str,
     # 3) notify owner in real time
     await _notify_owner_new_lead(client_id, contact, message)
     return {"active": True, "lead_id": contact.id, "lead_created": created}
+
+
+async def handle_owner_command(client_id: int, phone_number: str, text: str) -> dict:
+    """Parse and run commands the owner types from the business WhatsApp number.
+
+    Supported:
+      order <lead_id> <amount> [note]   -> create an order for that lead
+      mark  <lead_id> <status>          -> set lead status (new/contacted/qualified/won/lost)
+
+    The result is broadcast to the owner dashboard. It is deliberately NOT sent
+    back into the customer chat (the bridge never replies to fromMe messages).
+    """
+    import re as _re
+    from db import create_order, update_lead_status
+    t = (text or "").strip()
+    m = _re.match(r"(?i)^(order|mark)\s+(\d+)\s*(.*)$", t)
+    if not m:
+        return {"action": "ignored", "reason": f"not an owner command: '{t[:60]}'"}
+    cmd, lead_id, rest = m.group(1).lower(), int(m.group(2)), (m.group(3) or "").strip()
+
+    if cmd == "order":
+        # validate the lead belongs to this tenant first
+        from db import async_session, Contact
+        from sqlalchemy import select as _sel
+        async with async_session() as session:
+            lead = (await session.execute(
+                _sel(Contact).where(Contact.id == lead_id,
+                                    Contact.client_id == client_id))).scalar_one_or_none()
+        if not lead:
+            return {"action": "error",
+                    "reason": f"lead {lead_id} not found for client {client_id}"}
+        parts = rest.split(None, 1)
+        if not parts:
+            return {"action": "error", "reason": "usage: order <lead_id> <amount> [note]"}
+        raw = parts[0]
+        note = parts[1] if len(parts) > 1 else "created via WhatsApp owner command"
+        amount_str = _re.sub(r"(?i)[₹,\s]|rs\.?", "", raw)
+        try:
+            amount = float(amount_str)
+        except ValueError:
+            return {"action": "error", "reason": f"cannot parse amount from '{raw}'"}
+        order = await create_order(client_id, lead_id, amount, description=note,
+                                   notes=f"via owner WhatsApp command from {phone_number}")
+        payload = {"type": "order_created", "order_id": order.id, "lead_id": lead_id,
+                   "amount": order.amount, "currency": order.currency,
+                   "description": order.description,
+                   "timestamp": datetime.now(timezone.utc).isoformat()}
+        try:
+            await manager.broadcast(client_id, payload)
+        except Exception:
+            pass
+        logger.info("[owner-command] order created: %s", payload)
+        return {"action": "order_created", "order_id": order.id,
+                "lead_id": lead_id, "amount": order.amount, "currency": order.currency}
+
+    # mark
+    contact = await update_lead_status(client_id, lead_id, rest)
+    if not contact:
+        return {"action": "error", "reason": f"lead {lead_id} not found for client {client_id}"}
+    payload = {"type": "lead_status_changed", "lead_id": lead_id,
+               "lead_status": contact.lead_status,
+               "timestamp": datetime.now(timezone.utc).isoformat()}
+    try:
+        await manager.broadcast(client_id, payload)
+    except Exception:
+        pass
+    logger.info("[owner-command] lead %s marked %s", lead_id, contact.lead_status)
+    return {"action": "lead_marked", "lead_id": lead_id, "lead_status": contact.lead_status}
 
 
 @app.post("/api/webhook")

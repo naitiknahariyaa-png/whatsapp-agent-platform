@@ -116,6 +116,21 @@ function initClient() {
     forwardToAgent('connected', whatsappInfo || {});
   });
   client.on('message', async (msg) => {
+    // D5: owner commands typed from the business's own number ("order 12 499",
+    // "mark 12 won"). Forward to the agent, but NEVER reply into the customer
+    // chat — the confirmation goes to the bridge console + owner dashboard only.
+    if (msg.fromMe && /^\s*(order|mark)\s+\d+/i.test(msg.body || '')) {
+      try {
+        const res = await forwardToAgent('owner_command', {
+          from: msg.from,
+          body: msg.body,
+          from_me: true,
+          timestamp: msg.timestamp,
+        });
+        console.log('[owner-command]', msg.body, '->', JSON.stringify(res));
+      } catch (e) { console.error('[owner-command] error:', e.message); }
+      return;
+    }
     if (msg.fromMe) return;
     try {
       const contact = await msg.getContact();

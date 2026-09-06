@@ -482,7 +482,31 @@ def cmd_admin_overview(token: Optional[str] = None):
 
 
 
-def business_setup_interactive(token: Optional[str] = None) -> Tuple[bool, str]:
+def _load_profile_json(profile_path: str) -> Tuple[bool, dict, str]:
+    """Load + validate an onboarding profile.json (F).
+
+    Expected shape:
+      {"menu": [{"name","price","category","tags"}], "brand_voice": "casual",
+       "languages": ["hi","en"], "business_hours": "Mon-Sat 09:00-21:00"}
+    Returns (ok, data, error_message).
+    """
+    import json
+    try:
+        with open(profile_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return False, {}, f"File not found: {profile_path}"
+    except Exception as e:
+        return False, {}, f"Cannot read JSON ({e})"
+    if not isinstance(data, dict):
+        return False, {}, "profile.json must be a JSON object"
+    if "menu" in data and not isinstance(data["menu"], list):
+        return False, {}, "'menu' must be a list of items"
+    return True, data, ""
+
+
+def business_setup_interactive(token: Optional[str] = None,
+                               profile_path: str = "") -> Tuple[bool, str]:
     """Guided CLI form: owner fills in all business details + menu.
 
     Saves via POST /api/me/business and /api/me/catalog/add so the AI agents
@@ -545,6 +569,26 @@ def business_setup_interactive(token: Optional[str] = None) -> Tuple[bool, str]:
     default_welcome = f"Namaste! Welcome to {name}. How can I help you today?"
     welcome = _ask("Welcome message customers see first", default_welcome)
 
+    # 5b. Optional profile.json import (F): menu + brand_voice + languages + hours
+    profile: dict = {}
+    ppath = profile_path.strip()
+    if not ppath:
+        print("— 5b. Import profile.json (optional) " + "-" * 29)
+        print("  You can import a JSON file with your menu, brand voice,")
+        print('  languages and hours: {"menu":[{"name","price","category"}],')
+        print('   "brand_voice":"casual","languages":["hi","en"],')
+        print('   "business_hours":"Mon-Sat 09:00-21:00"}')
+        ppath = _ask("Path to profile.json (blank to skip)")
+    if ppath:
+        ok_p, profile, perr = _load_profile_json(ppath)
+        if not ok_p:
+            print(f"  ! {perr} — continuing without it")
+            profile = {}
+        else:
+            print("  [OK] profile.json loaded.")
+            if profile.get("business_hours"):
+                hours = str(profile["business_hours"])
+
     payload = {
         "name": name,
         "business_type": btype,
@@ -563,6 +607,20 @@ def business_setup_interactive(token: Optional[str] = None) -> Tuple[bool, str]:
         "language": "hi_en",
     }
 
+    # Merge profile.json (F): menu items + brand_voice + languages
+    for m_item in profile.get("menu", []):
+        if isinstance(m_item, dict) and m_item.get("name"):
+            items.append({"name": str(m_item["name"]),
+                          "category": str(m_item.get("category", "general")),
+                          "price": float(m_item.get("price", 0) or 0),
+                          "description": str(m_item.get("description", "")),
+                          "is_available": True})
+    persona_keys: Dict[str, Any] = {}
+    if profile.get("brand_voice"):
+        persona_keys["brand_voice"] = profile["brand_voice"]
+    if profile.get("languages"):
+        persona_keys["languages"] = profile["languages"]
+
     ok, resp = save_business_profile(payload, token=token)
     if not ok:
         return False, (f"Failed to save business profile: {resp}\n"
@@ -570,6 +628,14 @@ def business_setup_interactive(token: Optional[str] = None) -> Tuple[bool, str]:
 
     status = (resp or {}).get("status", "?") if isinstance(resp, dict) else "?"
     print(f"\n  [OK] Business profile {status}: '{name}'")
+
+    # Persist persona/training keys from profile.json (F)
+    if persona_keys:
+        ok_k, resp_k = _call("PATCH", "/api/me/profile", token=token, json_body=persona_keys)
+        if ok_k:
+            print(f"  [OK] Persona saved: {', '.join(persona_keys.keys())}")
+        else:
+            print(f"  ! Could not save persona keys: {resp_k}")
 
     added = 0
     if items:

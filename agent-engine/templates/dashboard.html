@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WAP Owner Dashboard</title>
+<style>
+  body{font-family:system-ui,Segoe UI,Arial;margin:0;background:#f4f5f7;color:#1f2430}
+  header{background:#111827;color:#fff;padding:14px 24px;display:flex;justify-content:space-between;align-items:center}
+  header a{color:#93c5fd;text-decoration:none;margin-left:16px}
+  main{max-width:1100px;margin:24px auto;padding:0 16px}
+  .card{background:#fff;border-radius:10px;padding:18px 22px;margin-bottom:18px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #e5e7eb}
+  th{color:#6b7280;text-transform:uppercase;font-size:11px}
+  .pill{padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600}
+  .on{background:#d1fae5;color:#065f46}.off{background:#fee2e2;color:#991b1b}
+  .st-new{background:#e0e7ff;color:#3730a3}.st-contacted{background:#fef3c7;color:#92400e}
+  .st-qualified{background:#dbeafe;color:#1e40af}.st-won{background:#d1fae5;color:#065f46}.st-lost{background:#fee2e2;color:#991b1b}
+  button,.btn{background:#2563eb;color:#fff;border:0;border-radius:6px;padding:7px 14px;font-size:13px;cursor:pointer;text-decoration:none;display:inline-block}
+  button.danger{background:#dc2626}
+  form.inline{display:inline-flex;gap:6px;align-items:center}
+  input{padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px}
+  .stats span{font-size:22px;font-weight:700;margin-right:28px}
+  .muted{color:#6b7280;font-size:12px}
+  .bubble{padding:8px 12px;border-radius:10px;max-width:70%;margin:4px 0;font-size:14px}
+  .in{background:#e5e7eb}.out{background:#d1fae5;margin-left:auto}
+  .thread{display:flex;flex-direction:column}
+  .err{background:#fee2e2;color:#991b1b;padding:10px;border-radius:6px;margin-bottom:12px}
+</style>
+</head>
+<body>
+<header>
+  <div><b>WAP</b> Owner Dashboard</div>
+  <div>
+    <a href="/admin/dashboard">Clients</a>
+    <a href="/api/admin/export" title="Leads CSV">Export CSV</a>
+    {% if view != 'login' %}<form method="post" action="/admin/dashboard/logout" style="display:inline"><button class="danger">Logout</button></form>{% endif %}
+  </div>
+</header>
+{% if view == 'login' %}
+  <div class="card" style="max-width:420px;margin:60px auto">
+    <h2>Sign in</h2>
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+    <form method="post" action="/admin/dashboard/login">
+      <p><input name="email" type="email" placeholder="Email" style="width:100%" required></p>
+      <p><input name="password" type="password" placeholder="Password" style="width:100%" required></p>
+      <button type="submit" style="width:100%">Login</button>
+    </form>
+  </div>
+
+{% elif view == 'home' %}
+  {% if stats %}
+  <div class="card stats">
+    <span>{{ stats.total_clients }} clients</span><span>{{ stats.active_clients }} active</span>
+    <span>{{ stats.total_leads }} leads</span><span>{{ stats.total_orders }} orders</span>
+    <span>₹{{ stats.monthly_revenue or 0 }}</span>
+  </div>
+  {% endif %}
+  <div class="card">
+    <h3>Clients</h3>
+    <table>
+      <tr><th>ID</th><th>Business</th><th>WhatsApp</th><th>Status</th><th></th><th></th></tr>
+      {% for c in clients %}
+      <tr>
+        <td>{{ c.id }}</td>
+        <td><a href="/admin/dashboard/clients/{{ c.id }}/leads"><b>{{ c.business_name }}</b></a></td>
+        <td>{{ c.whatsapp_number or '-' }}</td>
+        <td><span class="pill {{ 'on' if c.is_active else 'off' }}">{{ 'ACTIVE' if c.is_active else 'PAUSED' }}</span></td>
+        <td><form method="post" action="/admin/dashboard/clients/{{ c.id }}/toggle">
+              <button>{{ 'Pause' if c.is_active else 'Activate' }}</button></form></td>
+        <td><a class="btn" href="/admin/dashboard/clients/{{ c.id }}/leads">Leads</a></td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+{% elif view == 'leads' %}
+  <div class="card">
+    <a href="/admin/dashboard">&larr; All clients</a>
+    <h3>Leads — client #{{ client_id }}</h3>
+    <table>
+      <tr><th>ID</th><th>Name</th><th>Phone</th><th>Status</th><th>Score</th><th>Create Order</th><th></th></tr>
+      {% for l in leads %}
+      <tr>
+        <td>{{ l.id }}</td><td>{{ l.name or '-' }}</td><td>{{ l.phone_number }}</td>
+        <td><span class="pill st-{{ l.lead_status }}">{{ l.lead_status }}</span></td>
+        <td>{{ l.lead_score }}</td>
+        <td><form class="inline" method="post" action="/admin/dashboard/leads/{{ l.id }}/order">
+              <input type="hidden" name="client_id" value="{{ client_id }}">
+              <input name="amount" placeholder="₹ amount" size="7" required>
+              <input name="description" placeholder="note" size="14">
+              <button>Create</button></form></td>
+        <td><a href="/admin/dashboard/leads/{{ l.id }}/thread?client_id={{ client_id }}">Thread</a></td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <h3>Recent Orders</h3>
+    <table>
+      <tr><th>ID</th><th>Lead</th><th>Amount</th><th>Status</th><th>Description</th></tr>
+      {% for o in orders %}
+      <tr><td>#{{ o.id }}</td><td>{{ o.lead_id }}</td><td>₹{{ o.amount }}</td>
+          <td>{{ o.status }}</td><td>{{ o.description }}</td></tr>
+      {% else %}<tr><td colspan="5" class="muted">No orders yet</td></tr>{% endfor %}
+    </table>
+  </div>
+
+{% elif view == 'thread' %}
+  <div class="card">
+    <a href="/admin/dashboard/clients/{{ client_id }}/leads">&larr; Leads</a>
+    <h3>Thread — lead #{{ lead_id }} {% if lead %}({{ lead.name or lead.phone_number }}){% endif %}</h3>
+    <div class="thread">
+      {% for m in messages %}
+      <div class="bubble {{ 'out' if m.direction == 'outbound' else 'in' }}">{{ m.body }}
+        <div class="muted">{{ m.direction }} · {{ m.created_at }}</div></div>
+      {% else %}<p class="muted">No messages recorded for this lead yet.</p>{% endfor %}
+    </div>
+  </div>
+{% endif %}
+</main>
+</body>
+</html>
+

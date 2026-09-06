@@ -88,6 +88,8 @@ def main(argv=None) -> int:
 
     s = sub.add_parser("business-setup",
                        help="Guided form: enter your business details + menu (powers business-specific AI replies)")
+    s.add_argument("--profile", default="",
+                   help="Optional path to profile.json (menu/brand_voice/languages/business_hours)")
     s.add_argument("--token")
 
     s = sub.add_parser("my-business", help="Show your saved business profile and catalog")
@@ -183,7 +185,7 @@ def main(argv=None) -> int:
         ok, data = cc.cmd_approval_decision(args.id, args.approve, args.comment, token)
     elif args.command == "business-setup":
         token = token or cc.get_token(None)  # env-based login if available
-        ok, data = cc.business_setup_interactive(token)
+        ok, data = cc.business_setup_interactive(token, profile_path=args.profile)
         if not ok:
             print(data, file=sys.stderr)
         return 0 if ok else 1
