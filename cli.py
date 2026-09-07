@@ -152,12 +152,56 @@ def main(argv=None) -> int:
     s = sub.add_parser("admin-overview", help="Platform-wide stats (admin only)")
     s.add_argument("--token")
 
+    s = sub.add_parser("report-broadcast",
+                       help="Generate (and optionally send) outreach messages from a contacts report (XLSX/CSV)")
+    s.add_argument("path", help="path to the report file (.xlsx or .csv)")
+    s.add_argument("--dry-run", action="store_true", default=True,
+                   help="print the messages without sending (default)")
+    s.add_argument("--send", action="store_true",
+                   help="actually send via WhatsApp (requires connected bridge)")
+    s.add_argument("--voice", default="playful",
+                   help="brand voice: formal | casual | playful (default: playful)")
+    s.add_argument("--client-id", type=int, default=1)
+    s.add_argument("--token")
+
     args = p.parse_args(argv)
 
     if args.command == "start-server":
         ok, msg = cc.cmd_start_server(args.port)
         print(msg)
         return 0 if ok else 1
+
+    if args.command == "report-broadcast":
+        import asyncio
+        import sys as _sys
+        if hasattr(_sys.stdout, "reconfigure"):
+            _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        _sys.path.insert(0, "agent-engine")
+        from report_broadcast import load_report, build_all, send_valid
+        rows = load_report(args.path)
+        if not rows:
+            print(f"No usable rows found in {args.path} "
+                  "(need 'Business Name' + 'Contact Number' columns)", file=sys.stderr)
+            return 1
+        msgs = build_all(rows, brand_voice=args.voice)
+        valid = [m for m in msgs if m["valid"]]
+        print(f"Loaded {len(msgs)} rows: {len(valid)} valid, "
+              f"{len(msgs) - len(valid)} skipped (invalid/duplicate)\n")
+        for m in msgs:
+            status = "OK " if m["valid"] else f"SKIP ({m.get('reason', '?')})"
+            print(f"[{status}] {m['phone'] or m['raw_phone']} "
+                  f"({m['business_name']}) [{m['chars']} chars]")
+            print(f"       {m['text']}\n")
+        if args.send:
+            if input(f"Send {len(valid)} messages now? Type 'yes' to confirm: "
+                     ).strip().lower() != "yes":
+                print("Aborted - nothing sent.")
+                return 1
+            result = asyncio.run(send_valid(valid, client_id=args.client_id))
+            print(result)
+            return 0 if result.get("ok") else 1
+        print("(dry-run: nothing sent. Add --send to deliver.)")
+        return 0
 
     token = _need_token(args)
 
