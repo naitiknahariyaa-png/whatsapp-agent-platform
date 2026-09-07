@@ -205,23 +205,52 @@ def build_all(rows: List[Dict[str, Any]], brand_voice: str = "playful"
     return out
 
 
+async def _already_sent(client_id: int, phone: str, text: str) -> bool:
+    """True if an outgoing Message with this exact text was recorded already
+    (durable dedup so re-runs never double-send)."""
+    from sqlalchemy import select
+    from db import async_session, Message
+    async with async_session() as session:
+        res = await session.execute(
+            select(Message).where(Message.direction == "outgoing",
+                                  Message.client_id == client_id,
+                                  Message.content == text).limit(1))
+        return res.scalar_one_or_none() is not None
+
+
 async def send_valid(messages: List[Dict[str, Any]], client_id: int = 1,
                      list_name: str = "report-outreach") -> Dict[str, Any]:
-    """Send the valid messages via the BroadcastEngine (rate-limited)."""
+    """Send the valid messages with durable per-send tracking.
+
+    Dedup: a row whose content equals the message text is treated as already
+    sent, so interrupted/re-run batches never double-deliver. Each actual
+    send is recorded to the messages table (direction='outreach')."""
     from broadcast import broadcast_engine
+    from db import save_message
+    from outbound_limiter import send_whatsapp
+    from db import async_session
     valid = [m for m in messages if m.get("valid")]
     if not valid:
         return {"ok": False, "error": "no valid rows to send"}
+
     phones = [m["phone"] for m in valid]
     created = await broadcast_engine.create_list(
         list_name, phones,
         description=f"report outreach {len(phones)} contacts")
-    # send each row its own text: reuse engine per-message by sending the
-    # shortest common template would lose personalization, so send directly
-    sent = 0
-    from outbound_limiter import send_whatsapp
+
+    sent, skipped = 0, 0
     for m in valid:
+        if await _already_sent(client_id, m["phone"], m["text"]):
+            skipped += 1
+            continue
         ok = await send_whatsapp(m["phone"], m["text"], client_id=client_id)
-        sent += 1 if ok else 0
+        if ok:
+            try:
+                await save_message(phone_number=m["phone"], content=m["text"],
+                                   direction="outgoing", client_id=client_id)
+            except Exception as e:
+                logger.warning("[!] record send failed for %s: %s", m["phone"], e)
+            sent += 1
     return {"ok": True, "total": len(valid), "sent": sent,
+            "skipped_existing": skipped,
             "list": created if isinstance(created, str) else list_name}
