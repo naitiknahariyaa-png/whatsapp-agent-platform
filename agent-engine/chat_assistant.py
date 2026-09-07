@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 
 from config import settings
 from llm_setup import get_llm
-from db import async_session, create_booking, upsert_contact, Booking
+from db import async_session, create_booking, upsert_contact, Booking, Message
 from sqlalchemy import select
 
 logger = logging.getLogger("chat_assistant")
@@ -160,8 +160,22 @@ Respond ONLY with a single JSON object in this exact shape, nothing else:
     "customer_contact": "string or null",
     "notes": "string or null"
   }},
-  "reply_to_customer": "the exact message text to show the customer"
-}}"""
+  "reply_to_customer": "the exact message text to show the customer",
+  "action": null | {{
+    "type": "send_media" | "create_order",
+    "url": "<send_media only: https URL of an image the business provided in its config/catalog — NEVER invent a URL>",
+    "caption": "<send_media only: personalised caption matching the business tone>",
+    "amount": "<create_order only: numeric total in the business currency>",
+    "currency": "<create_order only: e.g. INR>",
+    "description": "<create_order only: what the customer confirmed buying/booking>"
+  }}
+}}
+
+MEDIA RULES / QR REFERRALS:
+- send_media: only when the customer asks to SEE something (photo, brochure, menu card, clinic tour, product picture), and only with a URL that appears verbatim in the business config or catalog. If none exists, do NOT set an action — describe it in text instead. Caption must be short, warm, and match the business tone.
+- QR referral tag: if the business config contains a "qr_tag" (or the conversation history mentions one), the customer scanned a physical QR code for that campaign/placement. Warmly acknowledge how they found the business ("Welcome! I see you scanned our {qr_tag} code"), and tailor the first recommendation to that placement (e.g. a table-tent code → today's specials; a poster code → the headline offer). Never mention QR codes if no tag is present.
+- create_order: only when the customer EXPLICITLY confirms a purchase or booking of a priced item from the catalog. Never invent an amount — use the exact catalog price.
+- Otherwise "action" must be null."""
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +187,113 @@ asks about the business (name, what you sell, prices, hours, how to book), answe
 using the facts given — never say you don't have information about your own business. Only reply
 'let me check with the owner' for facts genuinely not provided.
 """
+
+
+# ---------------------------------------------------------------------------
+# Sales-Assistant action execution (LLM-driven media + orders)
+# ---------------------------------------------------------------------------
+
+def _validate_media_url(url: str, profile: Dict[str, Any]) -> bool:
+    """Only allow https URLs that the business actually provided (profile or
+    catalog). Blocks prompt-injection-driven arbitrary/SSRF sends."""
+    if not isinstance(url, str) or not url.startswith("https://"):
+        return False
+    allowed: List[str] = []
+    for v in (profile or {}).values():
+        if isinstance(v, str) and v.startswith("https://"):
+            allowed.append(v)
+    try:
+        from business_profiles import business_manager
+        for p in business_manager.profiles.values():
+            for it in (business_manager.get_catalog(p.id) or []):
+                for v in it.values():
+                    if isinstance(v, str) and v.startswith("https://"):
+                        allowed.append(v)
+    except Exception:
+        pass
+    return url in allowed
+
+
+async def _execute_send_media(action: Dict[str, Any], client_id: int,
+                              customer_phone: str, profile: Dict[str, Any]) -> Dict[str, Any]:
+    """Send a photo/brochure over WhatsApp and log it as an outgoing Message."""
+    url = action.get("url", "")
+    caption = str(action.get("caption", ""))[:900]
+    if not _validate_media_url(url, profile):
+        logger.warning("[!] send_media blocked (untrusted URL) client=%s", client_id)
+        return {"media_sent": False, "media_error": "url not provided by business"}
+
+    from whatsapp_connector import whatsapp_connector
+    try:
+        result = await asyncio.to_thread(
+            whatsapp_connector.send_image, customer_phone, url, caption)
+    except Exception as e:
+        logger.error("[!] send_media failed client=%s: %s", client_id, e)
+        return {"media_sent": False, "media_error": str(e)}
+
+    sent = result.get("status") not in ("error", "offline")
+    try:
+        async with async_session() as session:
+            session.add(Message(
+                client_id=client_id, phone_number=customer_phone,
+                message_type="image", content=caption or None,
+                media_url=url, direction="outgoing",
+                status="sent" if sent else "failed"))
+            await session.commit()
+    except Exception as e:
+        logger.error("[!] send_media Message log failed: %s", e)
+
+    try:
+        from event_bus import get_event_bus
+        await get_event_bus().publish_dict(
+            "sales_assistant_media_sent", owner_id=client_id,
+            payload={"to": customer_phone, "media_url": url,
+                     "caption": caption, "sent": sent})
+    except Exception as e:
+        logger.warning("[!] media event publish failed: %s", e)
+    return {"media_sent": sent, "media_url": url,
+            **({} if sent else {"media_error": result.get("message", "")})}
+
+
+async def _execute_create_order(action: Dict[str, Any], client_id: int,
+                                customer_identifier: str,
+                                extracted: Dict[str, Any]) -> Optional[int]:
+    """Create an Order from the LLM's create_order action and publish an event."""
+    try:
+        amount = float(action.get("amount", 0))
+    except (TypeError, ValueError):
+        logger.warning("[!] create_order blocked (bad amount) client=%s", client_id)
+        return None
+    if amount <= 0:
+        return None
+    from db import create_order as db_create_order
+    try:
+        async with async_session() as session:
+            contact = await upsert_contact(
+                session, phone_number=customer_identifier or
+                (extracted or {}).get("customer_contact", "") or "unknown",
+                client_id=client_id,
+                name=(extracted or {}).get("customer_name", ""))
+            contact_id = contact.id
+        order = await db_create_order(
+            client_id=client_id, contact_id=contact_id, amount=amount,
+            currency=str(action.get("currency", "INR")),
+            description=str(action.get("description", "") or "AI sales assistant order"),
+        )
+    except Exception as e:
+        logger.error("[!] create_order failed client=%s: %s", client_id, e)
+        return None
+
+    try:
+        from event_bus import get_event_bus
+        await get_event_bus().publish_dict(
+            "sales_assistant_order_created", owner_id=client_id,
+            payload={"order_id": order.id, "lead_id": contact_id,
+                     "amount": amount, "currency": order.currency,
+                     "status": order.status})
+    except Exception as e:
+        logger.warning("[!] order event publish failed: %s", e)
+    return order.id
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +437,7 @@ async def process_chat_message(
     customer_identifier: str = "",
     history: Optional[List[Dict]] = None,
     client_id: int = 1,
+    qr_tag: str = "",
 ) -> Dict[str, Any]:
     """
     Process a web chat message end-to-end.
@@ -365,6 +487,10 @@ async def process_chat_message(
 
     # 2. Build prompt
     biz_config = build_business_config(business_id, profile)
+    if qr_tag:
+        # Customer arrived via a QR referral (see api/qr.py) — let the LLM
+        # acknowledge the placement and tailor its opening offer.
+        biz_config["qr_tag"] = qr_tag
     # Inject the "speak-as-the-business" persona so the widget answers with the
     # business's real name, services, prices and facts — not a generic reply.
     persona = ""
@@ -421,6 +547,27 @@ async def process_chat_message(
         except Exception as e:
             logger.error("[!] Failed to save booking: %s", e)
 
+    # 5. Execute optional Sales-Assistant actions (media / order)
+    action_result: Dict[str, Any] = {}
+    action = llm_result.get("action")
+    if isinstance(action, dict) and action.get("type"):
+        a_type = action.get("type")
+        if a_type == "send_media":
+            action_result = await _execute_send_media(
+                action, client_id, customer_identifier or
+                llm_result.get("extracted", {}).get("customer_contact", ""),
+                profile)
+        elif a_type == "create_order":
+            order_id = await _execute_create_order(
+                action, client_id, customer_identifier,
+                llm_result.get("extracted", {}))
+            action_result = ({"order_created": True, "order_id": order_id}
+                             if order_id else
+                             {"order_created": False,
+                              "order_error": "invalid amount or db failure"})
+        else:
+            logger.warning("[!] Unknown action type from LLM: %r", a_type)
+
     return {
         "reply_to_customer": llm_result.get("reply_to_customer", ""),
         "intent": llm_result.get("intent", "general_chat"),
@@ -428,4 +575,5 @@ async def process_chat_message(
         "extracted": llm_result.get("extracted", {}),
         "booking_saved": booking_saved,
         "owner_notified": owner_notified,
+        "action": action_result,
     }

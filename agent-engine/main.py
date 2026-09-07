@@ -372,6 +372,8 @@ except Exception as _e:
 try:
     from api.dashboard import router as dashboard_router
     app.include_router(dashboard_router)
+    from api.qr import router as qr_router
+    app.include_router(qr_router)
     logger.info("[v] Owner dashboard mounted at /admin/dashboard")
 except Exception as _e:
     logger.warning("[!] Dashboard router not mounted: %s", _e)
@@ -1673,6 +1675,90 @@ async def broadcast_resume(campaign_id: int, user: User = Depends(get_current_us
 async def broadcast_cancel(campaign_id: int, user: User = Depends(get_current_user)):
     from broadcast import broadcast_engine
     return await broadcast_engine.cancel_campaign(campaign_id)
+
+
+@app.post("/api/broadcast/ai-copy")
+async def broadcast_ai_copy(req: dict,
+                            user: User = Depends(get_current_user)):
+    """Broadcast-Assistant-AI: generate a <=160-char, brand-voice broadcast
+    copy (with one CTA and an optional allowlisted image) for a campaign.
+
+    Body overrides (all optional): service_summary, cta_text, cta_link,
+    image_url, contact {name, tags{segment}}. The generated text keeps
+    {{name}} placeholder support for the existing broadcast engine."""
+    from account_assistant import get_owner_profile
+    from broadcast_assistant import MAX_LEN, generate_broadcast_copy
+
+    profile = await get_owner_profile(user.client_id or 1) or {}
+    profile.setdefault("brand_voice", "casual")
+    for k in ("service_summary", "cta_text", "cta_link", "image_url"):
+        if req.get(k):
+            profile[k] = str(req[k])[:500]
+
+    contact = req.get("contact") or {}
+    out = await generate_broadcast_copy(profile, contact)
+    out["chars"] = len(out["text"])
+    out["within_limit"] = out["chars"] <= MAX_LEN
+    return out
+
+
+@app.post("/api/account-assistant")
+async def account_assistant(req: dict, request: Request,
+                            user: User = Depends(get_current_user)):
+    """Multi-Tenant-Assistant-AI: create/switch/update/deactivate accounts.
+
+    Body: {"message": "<owner request>", "client_id": <optional active account>}
+    The LLM proposes a JSON action; we validate it against the caller's tenant
+    scope and execute it. The LLM never touches the DB directly."""
+    import json as _json
+    from account_assistant import (
+        get_multi_tenant_prompt, call_account_llm, extract_action,
+        execute_account_action, list_accounts, get_owner_profile,
+    )
+    message = str(req.get("message", "")).strip()
+    if not message:
+        raise HTTPException(400, "message required")
+
+    lower = message.lower()
+    if any(kw in lower for kw in ("show my", "list my", "all my businesses",
+                                  "my businesses", "my accounts")):
+        return {"reply": "", "accounts": await list_accounts(user)}
+
+    client_id = req.get("client_id") or user.client_id
+    if client_id:
+        # tenant scope check: admins may address any account, others only their own
+        from auth import Role
+        if Role(user.role) != Role.ADMIN and \
+                int(client_id) != (user.client_id or -1):
+            return {"reply": "I'm sorry, I couldn't find that account. Please "
+                    "check the ID or make sure you're logged in as the owner "
+                    "of that business.", "action": {}}
+        if not await get_owner_profile(int(client_id)):
+            return {"reply": "I'm sorry, I couldn't find that account. Please "
+                    "check the ID or make sure you're logged in as the owner "
+                    "of that business.", "action": {}}
+
+    try:
+        if client_id:
+            system_prompt = await get_multi_tenant_prompt(int(client_id))
+        else:
+            system_prompt = ("You are Multi-Tenant-Assistant-AI. No active "
+                             "account yet — follow the new-account workflow "
+                             "in the user's request.")
+        reply = await call_account_llm(system_prompt, message)
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "LLM timed out")
+    except Exception as e:
+        raise HTTPException(502, f"LLM failed: {e}")
+
+    action_result: Dict[str, Any] = {}
+    action = extract_action(reply)
+    if action and action.get("action") not in ("send_media",):
+        action_result = await execute_account_action(action, user)
+        if action_result.get("ok"):
+            _json.dumps(action_result)  # sanity: serializable
+
+    return {"reply": reply, "action": action_result}
 
 
 @app.post("/api/manager/message")

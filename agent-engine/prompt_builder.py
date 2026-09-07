@@ -63,7 +63,7 @@ def load_business_profile(client_id: int) -> Optional[Dict[str, Any]]:
                 ]
                 address = getattr(profile, "address", "") or ""
                 city = _extract_city(address)
-                return {
+                out = {
                     "business_name": getattr(profile, "name", "") or "this business",
                     "industry": _industry_label(btype),
                     "city": city,
@@ -79,6 +79,13 @@ def load_business_profile(client_id: int) -> Optional[Dict[str, Any]]:
                     "welcome_message": getattr(profile, "welcome_message", "") or "",
                     "currency": getattr(profile, "currency", "INR") or "INR",
                 }
+                # pass through business-provided media URLs (prompt allowlist)
+                for _k in ("welcome_image_url", "gallery_images",
+                           "menu_image_url", "product_images", "logo_url"):
+                    _v = getattr(profile, _k, None)
+                    if _v:
+                        out[_k] = _v
+                return out
     except Exception as e:
         logger.warning("load_business_profile(file) failed for client %s: %s", client_id, e)
 
@@ -102,22 +109,42 @@ def load_business_profile(client_id: int) -> Optional[Dict[str, Any]]:
         except RuntimeError:
             client = asyncio.run(_fetch())
         if client:
-            return {
+            # Merge the onboarding profile.json blob (menu / brand_voice /
+            # languages / business_hours) stored on Client.business_profile.
+            extra: Dict[str, Any] = {}
+            try:
+                if isinstance(client.business_profile, dict):
+                    extra = client.business_profile
+            except Exception:
+                extra = {}
+            menu = extra.get("menu") or []
+            merged_pricing = [
+                f"{m.get('name')} - {extra.get('currency', 'INR')} {m.get('price', 0)}"
+                for m in menu if isinstance(m, dict) and m.get("name")
+            ]
+            out = {
                 "business_name": client.business_name or "this business",
                 "industry": _industry_label(client.vertical or "general"),
                 "city": "",
-                "services": [],
-                "pricing": [],
+                "services": [m.get("name") for m in menu
+                             if isinstance(m, dict) and m.get("name")],
+                "pricing": merged_pricing,
                 "selling_points": [],
-                "tone": DEFAULT_TONE,
+                "tone": extra.get("brand_voice") or DEFAULT_TONE,
                 "contact_phone": client.whatsapp_number or "",
                 "contact_email": "",
                 "address": "",
-                "working_hours": "",
+                "working_hours": extra.get("business_hours") or "",
                 "payment_methods": [],
                 "welcome_message": "",
-                "currency": "INR",
+                "currency": extra.get("currency", "INR") or "INR",
             }
+            # business-provided media URLs for the prompt allowlist
+            for _k in ("welcome_image_url", "gallery_images",
+                       "menu_image_url", "product_images", "logo_url"):
+                if extra.get(_k):
+                    out[_k] = extra[_k]
+            return out
     except Exception as e:
         logger.warning("load_business_profile(db) failed for client %s: %s", client_id, e)
 
@@ -132,6 +159,62 @@ def _extract_city(address: str) -> str:
         return parts[-1] if parts else ""
     except Exception:
         return ""
+
+
+def _vertical_guidelines(business_type: str, profile: Dict[str, Any]) -> str:
+    """Per-vertical tone/vocabulary/media guidelines for the outbound message
+    template (Sales-Assistant-AI behaviour spec)."""
+    bt = (business_type or "").lower()
+    if bt in ("doctor", "healthcare", "clinic"):
+        return """## VERTICAL GUIDELINES — DOCTOR / HEALTHCARE
+- Calm, professional tone. Mention: consultation, appointment, clinic hours, prescription.
+- If the customer asks to SEE something (clinic, facility), use ONLY the image URL in
+  welcome_image_url if provided. Never send any other image."""
+    if bt in ("salon", "beauty"):
+        return """## VERTICAL GUIDELINES — SALON / BEAUTY
+- Friendly, upbeat tone; emojis are allowed.
+- Vocabulary: haircut, styling package, special offer, "book your makeover".
+- If asked for pictures, send the before/after gallery image from gallery_images
+  (if provided)."""
+    if bt in ("restaurant", "food", "hotel"):
+        return """## VERTICAL GUIDELINES — RESTAURANT / FOOD
+- Warm, inviting tone. Include actual dish names, "today's special", reservation times.
+- Offer a menu-preview image from menu_image_url (if provided) when the customer asks."""
+    if bt in ("retail", "e-commerce", "ecommerce", "shop"):
+        return """## VERTICAL GUIDELINES — RETAIL / E-COMMERCE
+- Concise messages. Always highlight: product name, price, and any discount code
+  from the catalog/business details.
+- Attach the matching product photo URL from product_images (if provided)."""
+    if bt in ("lawyer", "ca", "legal", "accountant", "chartered accountant"):
+        return """## VERTICAL GUIDELINES — LEGAL / CA / ACCOUNTANT
+- Formal, respectful tone. NO emojis.
+- Vocabulary: consultation fee, document preparation, court date, filing deadline.
+- Only send a professional logo image (logo_url, if provided) — nothing else."""
+    voice = profile.get("brand_voice") or "friendly and professional"
+    return f"""## VERTICAL GUIDELINES — GENERAL
+- Use the business's brand voice: {voice}.
+- Follow the knowledge base and guardrails above strictly; fall back to
+  "{OFFLINE_FALLBACK}" for anything not covered."""
+
+
+def _media_fields_block(profile: Dict[str, Any]) -> str:
+    """List the business-provided media URLs the assistant may send (allowlist)."""
+    keys = ("welcome_image_url", "gallery_images", "menu_image_url",
+            "product_images", "logo_url")
+    lines = []
+    for k in keys:
+        v = profile.get(k)
+        if isinstance(v, str) and v.startswith("https://"):
+            lines.append(f"- {k}: {v}")
+        elif isinstance(v, list):
+            lines.append(f"- {k}: " + ", ".join(
+                u for u in v if isinstance(u, str) and u.startswith("https://")))
+    if not lines:
+        return ("- No media URLs provided. Do NOT send any photos or files; "
+                "describe in text instead.")
+    return ("\n".join(lines) +
+            "\n- ONLY these URLs may be sent as media. Never invent or "
+            "substitute a URL.")
 
 
 def build_advanced_system_prompt(business_profile: Dict[str, Any]) -> str:
@@ -158,6 +241,9 @@ def build_advanced_system_prompt(business_profile: Dict[str, Any]) -> str:
         else (", ".join(f"{k}: {v}" for k, v in working_hours.items()) if isinstance(working_hours, dict) else "not provided")
     payments_block = ", ".join(payment_methods) if payment_methods else "not listed"
 
+    guidelines = _vertical_guidelines(industry, b)
+    media_block = _media_fields_block(b)
+
     return f"""You are the official AI receptionist for {business_name}, a {industry} located in {city}.
 
 ## PERSONA & IDENTITY
@@ -180,6 +266,19 @@ Business details:
 - Accepted payments: {payments_block}
 - Contact: {contact_phone}{(' | ' + contact_email if contact_email else '')}
 
+## VERTICAL GUIDELINES & MEDIA
+{guidelines}
+
+Media you may send (allowlist):
+{media_block}
+
+## OUTBOUND MESSAGE TEMPLATE (apply to EVERY message)
+1. Greet/acknowledge in the customer's language, in the vertical's tone.
+2. Address their specific question/request using ONLY the knowledge base above.
+3. If media helps (and an allowlisted URL fits), include it — otherwise describe in text.
+4. Recommend ONE concrete next step (appointment, package, product, demo).
+5. Close warmly in the vertical's tone. Keep it WhatsApp-length (short paragraphs).
+
 ## STRICT GUARDRAILS (ANTI-HALLUCINATION)
 - Do NOT make up prices, discounts, services, availability, or offers.
 - Only quote a price, service, or fact if it appears in the knowledge base above.
@@ -196,6 +295,82 @@ Business details:
 - Your primary goal is to answer FAQs and collect the customer's requirements to book an appointment or generate a lead.
 - Politely gather: name, preferred date/time (if relevant), and the specific service/product they need.
 - Pass complete booking/order intents through so they can be processed.
+"""
+
+
+def build_system_prompt(profile: Optional[Dict[str, Any]]) -> str:
+    """Build a per-shop system prompt from a raw ``profile.json``-shaped dict.
+
+    Accepts the onboarding-wizard profile format (see ``business-setup`` /
+    ``upload-profile``)::
+
+        {
+          "menu": [{"name": "Service A", "price": 199, "category": "hair"}],
+          "brand_voice": "casual",
+          "languages": ["hi", "en"],
+          "business_hours": "Mon-Sat 09:00-21:00"
+        }
+
+    and produces a prompt with brand voice, menu items, and the same
+    anti-hallucination guardrails as :func:`build_advanced_system_prompt`
+    (they share the OFFLINE_FALLBACK wording so behaviour stays consistent).
+    Safe on ``None``/empty input — falls back to a generic-but-guarded prompt.
+    """
+    p = profile or {}
+    business_name = p.get("business_name") or p.get("name") or "this business"
+    brand_voice = str(p.get("brand_voice") or "friendly and professional")
+    languages = p.get("languages") or ["en", "hi"]
+    hours = p.get("business_hours") or p.get("working_hours") or "not provided"
+    contact = p.get("contact_phone") or p.get("phone") or ""
+    currency = p.get("currency", "INR")
+
+    menu = p.get("menu") or p.get("catalog") or []
+    if isinstance(menu, dict):
+        menu = [{"name": k, "price": v} for k, v in menu.items()]
+    menu_block = "\n".join(
+        f"- {m.get('name', '?')}: {currency} {m.get('price', '?')}"
+        + (f" (category: {m['category']})" if m.get("category") else "")
+        for m in menu if isinstance(m, dict) and m.get("name")
+    ) or "- (menu not provided — do NOT invent items or prices)"
+
+    langs = ", ".join(languages) if isinstance(languages, list) else str(languages)
+
+    guidelines = _vertical_guidelines(p.get("business_type") or p.get("vertical"), p)
+    media_block = _media_fields_block(p)
+
+    return f"""You are the official AI receptionist for {business_name} on WhatsApp.
+
+## BRAND VOICE
+- Communicate in a {brand_voice} tone at all times.
+- Reply in the customer's language; preferred languages: {langs}.
+
+## MENU / CATALOGUE (use ONLY these items and prices)
+{menu_block}
+
+Business hours: {hours}
+{('- Contact: ' + contact) if contact else ''}
+
+{guidelines}
+
+Media you may send (allowlist):
+{media_block}
+
+## OUTBOUND MESSAGE TEMPLATE (apply to EVERY message)
+1. Greet/acknowledge in the customer's language, in the vertical's tone.
+2. Answer using ONLY the menu and details above.
+3. Include media only when an allowlisted URL fits; otherwise describe in text.
+4. Recommend ONE concrete next step, then close warmly.
+
+## STRICT GUARDRAILS (ANTI-HALLUCINATION)
+- Do NOT make up prices, discounts, items, availability, or offers.
+- Only quote an item or price if it appears in the menu above.
+- If asked about something NOT in the menu or business details, reply exactly:
+  "{OFFLINE_FALLBACK}"
+- Never invent timings, staff, or policies.
+
+## GOAL
+- Answer FAQs using only the facts above and collect the customer's
+  requirements (name, item/service, preferred time) to generate a lead.
 """
 
 

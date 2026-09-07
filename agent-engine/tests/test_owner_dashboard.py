@@ -115,3 +115,38 @@ async def test_dashboard_login_leads_order():
                                cookies={"wap_dashboard": tok2}) as ac2:
             r = await ac2.get("/admin/dashboard/clients/2/leads")
             assert r.status_code == 403
+
+
+def test_build_system_prompt_profile_json():
+    """build_system_prompt() consumes the raw profile.json shape (item 7)."""
+    from prompt_builder import build_system_prompt
+
+    profile = {
+        "menu": [
+            {"name": "Service A", "price": 199, "category": "hair"},
+            {"name": "Product B", "price": 499, "category": "retail"},
+        ],
+        "brand_voice": "casual",
+        "languages": ["hi", "en"],
+        "business_hours": "Mon-Sat 09:00-21:00",
+    }
+    prompt = build_system_prompt(profile)
+    assert "Service A: INR 199" in prompt
+    assert "category: hair" in prompt
+    assert "casual" in prompt
+    assert "hi, en" in prompt
+    assert "Mon-Sat 09:00-21:00" in prompt
+    assert "ANTI-HALLUCINATION" in prompt
+    assert "Do NOT make up prices" in prompt
+
+    empty = build_system_prompt(None)
+    assert "do NOT invent items or prices" in empty
+    assert "ANTI-HALLUCINATION" in empty
+
+
+def test_build_system_prompt_dict_menu():
+    from prompt_builder import build_system_prompt
+
+    p = build_system_prompt({"menu": {"Combo": 299}, "brand_voice": "formal"})
+    assert "Combo: INR 299" in p
+    assert "formal" in p

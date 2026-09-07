@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import String, Text, Integer, Float, Boolean, DateTime, JSON, ForeignKey, select
 from crypto_fields import EncryptedString, hmac_phone_hash
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict
 import os
 
@@ -83,6 +83,7 @@ class Client(Base):
     plan: Mapped[str] = mapped_column(String(20), default="trial")  # trial/basic/pro
     is_active: Mapped[bool] = mapped_column(default=True)
     business_profile: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)  # menu/services/pricing/brand-voice for per-shop LLM prompt
+    qr_tracking_enabled: Mapped[bool] = mapped_column(Boolean, default=True)  # per-client QR scan tracking on/off
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -824,6 +825,72 @@ class Order(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class QRScan(Base):
+    """A scan of a shop's QR code (poster/flyer/table-tent referral tag)."""
+    __tablename__ = "qr_scans"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True)
+    tag: Mapped[str] = mapped_column(String(64), index=True)  # campaign/placement tag
+    source: Mapped[Optional[str]] = mapped_column(String(32))  # poster|flyer|table|web|...
+    ip_hash: Mapped[Optional[str]] = mapped_column(String(64))  # rate-limit/abuse key
+    user_agent: Mapped[Optional[str]] = mapped_column(String(255))
+    meta: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    def to_dict(self) -> Dict:
+        return {
+            "id": self.id, "client_id": self.client_id, "tag": self.tag,
+            "source": self.source, "created_at": self.created_at.isoformat()
+            if self.created_at else None,
+            **(self.meta or {}),
+        }
+
+
+async def create_qr_scan(client_id: int, tag: str, source: str = "",
+                         ip_hash: str = "", user_agent: str = "",
+                         meta: Optional[dict] = None) -> QRScan:
+    """Record a QR scan (public endpoint path)."""
+    async with async_session() as session:
+        scan = QRScan(client_id=client_id, tag=tag, source=source or None,
+                      ip_hash=ip_hash or None, user_agent=user_agent[:255] or None,
+                      meta=meta or {})
+        session.add(scan)
+        await session.commit()
+        await session.refresh(scan)
+        return scan
+
+
+async def qr_report(client_id: int, days: int = 30) -> Dict:
+    """Aggregated QR-scan report: totals per tag and per day."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    async with async_session() as session:
+        rows = (await session.execute(
+            select(QRScan).where(QRScan.client_id == client_id,
+                                 QRScan.created_at >= since)
+            .order_by(QRScan.created_at.desc()).limit(5000))).scalars().all()
+    by_tag: Dict[str, int] = {}
+    by_day: Dict[str, int] = {}
+    for r in rows:
+        by_tag[r.tag] = by_tag.get(r.tag, 0) + 1
+        day = r.created_at.strftime("%Y-%m-%d") if r.created_at else "unknown"
+        by_day[day] = by_day.get(day, 0) + 1
+    return {
+        "client_id": client_id, "days": days, "total": len(rows),
+        "by_tag": dict(sorted(by_tag.items(), key=lambda kv: -kv[1])),
+        "by_day": dict(sorted(by_day.items())),
+        "recent": [r.to_dict() for r in rows[:25]],
+    }
+
+
+async def qr_tracking_enabled(client_id: int) -> bool:
+    """Per-client enable/disable flag for QR tracking."""
+    async with async_session() as session:
+        res = await session.execute(
+            select(Client.qr_tracking_enabled).where(Client.id == client_id))
+        val = res.scalar_one_or_none()
+        return bool(val) if val is not None else True
 
 
 async def get_client_by_whatsapp_number(whatsapp_number: str) -> Optional[Client]:
