@@ -835,6 +835,28 @@ async def webhook(request: Request):
 
     reply = None
     if phone_number and (message or media_data):
+        # Broadcast-Lead-Creative-AI: capture affirmative replies as leads.
+        try:
+            from creative_broadcast import is_affirmative, capture_lead_reply
+            if message and is_affirmative(message):
+                lead = await capture_lead_reply(client_id, phone_number, message)
+                reply = lead.get("reply", "")
+                # mark the broadcast response on the dashboard
+                try:
+                    await manager.broadcast(client_id, {
+                        "type": "broadcast_lead",
+                        "phone_number": phone_number,
+                        "message": message,
+                        "reply": reply,
+                        "source": "broadcast",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                except Exception:
+                    pass
+                return {"status": "ok", "reply": reply,
+                        "source": "broadcast_lead"}
+        except Exception as e:
+            logger.warning("broadcast-lead affirmative check failed: %s", e)
         orchestrator: AgentOrchestrator = app.state.orchestrator
         reply = await orchestrator.process_message(phone_number, message, client_id, media_data, media_mimetype)
         # Bridge hook: capture lead + notify owner (subscription gate inside)

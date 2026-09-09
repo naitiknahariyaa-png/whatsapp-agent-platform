@@ -164,6 +164,23 @@ def main(argv=None) -> int:
     s.add_argument("--client-id", type=int, default=1)
     s.add_argument("--token")
 
+    s = sub.add_parser("creative-broadcast",
+                       help="Broadcast-Lead-Creative-AI: A/B template human-like one-by-one sends (Meta Cloud first)")
+    s.add_argument("path", help="path to the report file (.xlsx or .csv)")
+    s.add_argument("--dry-run", action="store_true", default=True,
+                   help="print the plan without sending (default)")
+    s.add_argument("--send", action="store_true",
+                   help="actually send one-by-one with ~55-65s gaps")
+    s.add_argument("--self-test", dest="self_test",
+                   help="send one test message to this number first, then stop")
+    s.add_argument("--voice", default="casual",
+                   help="brand voice: formal | casual | playful")
+    s.add_argument("--use-bridge", dest="use_bridge", action="store_true",
+                   help="use the WhatsApp bridge instead of Meta Cloud API")
+    s.add_argument("--client-id", type=int, default=1)
+    s.add_argument("--limit", type=int, default=0,
+                   help="only send the first N contacts (0 = all)")
+
     args = p.parse_args(argv)
 
     if args.command == "start-server":
@@ -201,6 +218,79 @@ def main(argv=None) -> int:
             print(result)
             return 0 if result.get("ok") else 1
         print("(dry-run: nothing sent. Add --send to deliver.)")
+        return 0
+
+    if args.command == "creative-broadcast":
+        import asyncio
+        import sys as _sys
+        if hasattr(_sys.stdout, "reconfigure"):
+            _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        _sys.path.insert(0, "agent-engine")
+        from report_broadcast import load_report, normalize_phone
+        from creative_broadcast import (plan_creative_batch, send_human_like,
+                                        MAX_LEN, is_affirmative)
+
+        rows = load_report(args.path)
+        if not rows:
+            print(f"No usable rows found in {args.path}", file=sys.stderr)
+            return 1
+        # the loader keyed phones under 'phone'; normalize + map first name
+        contacts = []
+        for r in rows:
+            ph = normalize_phone(r.get("phone", ""))
+            if not ph:
+                continue
+            contacts.append({"first_name": r.get("first_name") or r.get("name") or "",
+                             "phone": ph, "tags": {}})
+        if args.limit > 0:
+            contacts = contacts[:args.limit]
+        profile = {"business_name": "Your Business", "vertical": "general",
+                   "brand_voice": args.voice,
+                   "service_name": "AI-Powered Booking Assistant",
+                   "service_one_liner": ("automates WhatsApp conversations and "
+                                         "books appointments 24/7"),
+                   "key_benefits": ["fill slots 30% faster",
+                                    "cut admin time by 2 hrs daily",
+                                    "boost revenue by up to 20%"],
+                   "cta_text": "Reply YES for a 14-day free trial",
+                   "cta_link": ""}
+
+        async def status(i, total, entry, kind):
+            print(f"[{i}/{total}] {entry['phone']} (T{entry['template_id']}, "
+                  f"+{entry['delay_seconds']:.0f}s)  -> {kind}")
+            if entry.get("message"): print(f"    {entry['message'][:120]}")
+            else: print(f"    [media] {entry['media']['url']} | {entry['media']['caption'][:60]}")
+
+        if args.self_test:
+            tpl = {"phone": args.self_test, "first_name": "there",
+                   "delay_seconds": 0, "template_id": "A",
+                   "message": "Self-test: AI assistant ready. Reply YES to book a demo."}
+            print("Sending self-test to", args.self_test)
+            async def _st():
+                await send_human_like([tpl], client_id=args.client_id,
+                                      use_meta=not args.use_bridge,
+                                      on_status=status)
+            res = asyncio.run(_st())
+            print("SELF-TEST RESULT:", res)
+            return 0 if res.get("ok") else 1
+
+        plan = plan_creative_batch(contacts, profile)
+        print(f"Planned {len(plan)} messages (A/B rotated, ~55-65s gaps)\n")
+        if args.send:
+            ans = input(f"Send {len(plan)} one-by-one now? Type 'yes' to confirm: ")
+            if ans.strip().lower() != "yes":
+                print("Aborted - nothing sent.")
+                return 1
+            result = asyncio.run(send_human_like(
+                plan, client_id=args.client_id, use_meta=not args.use_bridge,
+                on_status=status))
+            print("\nRESULT:", result)
+            return 0 if result.get("ok") else 1
+        async def _dry():
+            for i, p in enumerate(plan):
+                await status(i+1, len(plan), p, "DRY")
+        asyncio.run(_dry())
+        print("\n(dry-run: nothing sent. Add --send to deliver one-by-one.)")
         return 0
 
     token = _need_token(args)
