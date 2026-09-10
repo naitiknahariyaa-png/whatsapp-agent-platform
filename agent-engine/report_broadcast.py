@@ -246,8 +246,9 @@ async def send_valid(messages: List[Dict[str, Any]], client_id: int = 1,
         ok = await send_whatsapp(m["phone"], m["text"], client_id=client_id)
         if ok:
             try:
-                await save_message(phone_number=m["phone"], content=m["text"],
-                                   direction="outgoing", client_id=client_id)
+                async with async_session() as session:
+                    await save_message(session, phone_number=m["phone"], content=m["text"],
+                                       direction="outgoing", client_id=client_id)
             except Exception as e:
                 logger.warning("[!] record send failed for %s: %s", m["phone"], e)
             sent += 1

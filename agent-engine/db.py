@@ -532,7 +532,7 @@ async def init_db():
 
 
 async def save_message(session, phone_number, content, direction="incoming", message_type="text",
-                        client_id: int = 1):
+                        client_id: int = 1, media_url=None, status=None):
     phone_h = hmac_phone_hash(phone_number)
     result = await session.execute(
         select(Conversation).where(Conversation.phone_hash == phone_h,
@@ -548,6 +548,8 @@ async def save_message(session, phone_number, content, direction="incoming", mes
     conversation.unread_count = (conversation.unread_count or 0) + 1 if direction == "incoming" else 0
     message = Message(conversation_id=conversation.id, phone_number=phone_number, phone_hash=phone_h,
                       content=content, direction=direction, message_type=message_type,
+                      media_url=media_url,
+                      status=status or ("sent" if direction == "outgoing" else "received"),
                       client_id=client_id)
     session.add(message)
     await session.commit()

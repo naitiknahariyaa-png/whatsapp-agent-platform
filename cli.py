@@ -180,6 +180,9 @@ def main(argv=None) -> int:
     s.add_argument("--client-id", type=int, default=1)
     s.add_argument("--limit", type=int, default=0,
                    help="only send the first N contacts (0 = all)")
+    s.add_argument("--pace", choices=["human", "bot"], default="human",
+                   help="human = ~55-65s jittered gap per send (default); "
+                        "bot = spec anti_ban 2-7s jitter, max 20/min via limiter")
 
     args = p.parse_args(argv)
 
@@ -228,7 +231,8 @@ def main(argv=None) -> int:
         _sys.path.insert(0, "agent-engine")
         from report_broadcast import load_report, normalize_phone
         from creative_broadcast import (plan_creative_batch, send_human_like,
-                                        MAX_LEN, is_affirmative)
+                                        MAX_LEN, is_affirmative,
+                                        HUMAN_MIN, HUMAN_MAX)
 
         rows = load_report(args.path)
         if not rows:
@@ -256,6 +260,9 @@ def main(argv=None) -> int:
                    "cta_link": ""}
 
         async def status(i, total, entry, kind):
+            if entry.get("action") == "SKIP":
+                print(f"[{i}/{total}] {entry.get('phone')}  -> {kind}")
+                return
             print(f"[{i}/{total}] {entry['phone']} (T{entry['template_id']}, "
                   f"+{entry['delay_seconds']:.0f}s)  -> {kind}")
             if entry.get("message"): print(f"    {entry['message'][:120]}")
@@ -267,15 +274,17 @@ def main(argv=None) -> int:
                    "message": "Self-test: AI assistant ready. Reply YES to book a demo."}
             print("Sending self-test to", args.self_test)
             async def _st():
-                await send_human_like([tpl], client_id=args.client_id,
-                                      use_meta=not args.use_bridge,
-                                      on_status=status)
+                return await send_human_like([tpl], client_id=args.client_id,
+                                             use_meta=not args.use_bridge,
+                                             on_status=status)
             res = asyncio.run(_st())
             print("SELF-TEST RESULT:", res)
             return 0 if res.get("ok") else 1
 
-        plan = plan_creative_batch(contacts, profile)
-        print(f"Planned {len(plan)} messages (A/B rotated, ~55-65s gaps)\n")
+        plan = plan_creative_batch(contacts, profile, rotate=True,
+                                   client_id=args.client_id)
+        gap = "~55-65s human gaps" if args.pace == "human" else "2-7s anti-ban jitter"
+        print(f"Planned {len(plan)} messages (A/B rotated, {gap})\n")
         if args.send:
             ans = input(f"Send {len(plan)} one-by-one now? Type 'yes' to confirm: ")
             if ans.strip().lower() != "yes":
@@ -283,7 +292,8 @@ def main(argv=None) -> int:
                 return 1
             result = asyncio.run(send_human_like(
                 plan, client_id=args.client_id, use_meta=not args.use_bridge,
-                on_status=status))
+                on_status=status,
+                gap_range=(HUMAN_MIN, HUMAN_MAX) if args.pace == "human" else None))
             print("\nRESULT:", result)
             return 0 if result.get("ok") else 1
         async def _dry():

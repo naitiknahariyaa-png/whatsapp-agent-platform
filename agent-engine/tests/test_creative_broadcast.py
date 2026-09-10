@@ -42,20 +42,48 @@ def test_emoji_rules():
     assert any(e in casual for e in ("🚀", "👍", "✨", "🔥"))
 
 
-def test_rotation_alternates():
-    rows = [{"phone": "+911", "name": ""}, {"phone": "+912", "name": ""},
-            {"phone": "+913", "name": ""}]
-    plan = plan_creative_batch(rows, PROFILE, rotate=True)
+def test_rotation_random_and_delays():
+    # Spec: rotate_templates=true -> RANDOM A/B pick; delays 2-7s ints;
+    # entries carry client_id (spec persistence metadata).
+    rows = [{"phone": f"+91900000000{i}", "name": f"P{i}"} for i in range(24)]
+    plan = plan_creative_batch(rows, CASUAL, rotate=True, client_id=77)
+    tpls = {p["template_id"] for p in plan}
+    assert tpls == {"A", "B"}                       # both templates appear
+    assert all(2 <= p["delay_seconds"] <= 7 for p in plan)
+    assert all(isinstance(p["delay_seconds"], int) for p in plan)
+    assert all(p["client_id"] == 77 for p in plan)
+
+
+def test_rotation_alternate_mode():
+    # "alternate" keeps the deterministic A,B,A order (tests/preview).
+    rows = [{"phone": f"+91900000000{i}"} for i in range(3)]
+    plan = plan_creative_batch(rows, CASUAL, rotate="alternate")
     assert [p["template_id"] for p in plan] == ["A", "B", "A"]
-    assert all(p["delay_seconds"] >= 55 and p["delay_seconds"] <= 65
-               for p in plan)
 
 
-def test_media_when_image():
-    rows = [{"phone": "+911", "name": "A"}]
-    plan = plan_creative_batch(rows, {**PROFILE, "image_url": "https://x.com/b.jpg"})
-    assert "media" in plan[0]
-    assert plan[0]["media"]["type"] == "image"
+def test_skip_opted_out_and_invalid():
+    # Spec resp. 1: opted-out -> SKIP; non-E.164 -> SKIP (never messaged).
+    rows = [{"phone": "+919999777777", "name": "Ok", "opted_out": True},
+            {"phone": "not-a-number", "name": "Bad"},
+            {"phone": "+919999888888", "name": "Good"}]
+    plan = plan_creative_batch(rows, CASUAL, rotate="alternate")
+    assert plan[0]["action"] == "SKIP" and plan[0]["skip_reason"] == "opted_out"
+    assert plan[1]["action"] == "SKIP" and plan[1]["skip_reason"] == "invalid_phone"
+    assert "message" in plan[2] and plan[2]["template_id"] == "A"
+
+
+def test_media_only_on_b_and_casual():
+    # Spec resp. 4: image "adds value" heuristic — B/casual only.
+    prof = {**CASUAL, "image_url": "https://x.com/b.jpg"}
+    rows = [{"phone": "+919999777777"}, {"phone": "+919999666666"}]
+    plan = plan_creative_batch(rows, prof, rotate="alternate")
+    assert "media" not in plan[0] and "message" in plan[0]   # A -> plain text
+    assert plan[1]["media"]["type"] == "image" and \
+        plan[1]["media"]["url"].startswith("https://")
+    # formal voice never gets media, even on B
+    plan_f = plan_creative_batch(rows, {**PROFILE, "image_url": "https://x.com/b.jpg"},
+                                 rotate="alternate")
+    assert "media" not in plan_f[1] and "message" in plan_f[1]
 
 
 def test_affirmative_matches():
