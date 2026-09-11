@@ -1,0 +1,26 @@
+[
+  {
+    "business_name": "Patel Dental Care",
+    "vertical": "doctor",
+    "whatsapp_number": "+919111111101",
+    "brand_voice": "formal",
+    "services": ["Dental checkup", "Teeth whitening"],
+    "business_hours": "Mon-Sat 09:00-18:00",
+    "contacts": [
+      {"name": "Amit", "phone": "+919888777501"},
+      {"name": "Sunita", "phone": "+919888777502"}
+    ]
+  },
+  {
+    "business_name": "Cafe Aroma",
+    "vertical": "restaurant",
+    "whatsapp_number": "+919111111102",
+    "brand_voice": "casual",
+    "services": ["Espresso bar", "Wood-fired pizza"],
+    "business_hours": "Mon-Sun 08:00-23:00",
+    "contacts": [
+      {"name": "Divya", "phone": "+919888777601"},
+      {"name": "Rahul", "phone": "+919888777602"}
+    ]
+  }
+]
