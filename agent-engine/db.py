@@ -10,7 +10,7 @@ os.environ['SQLALCHEMY_SKIP_PLATFORM_CHECK'] = '1'  # Fix for Windows
 logger = logging.getLogger("db")
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy import String, Text, Integer, Float, Boolean, DateTime, JSON, ForeignKey, select
 from crypto_fields import EncryptedString, hmac_phone_hash
 from datetime import datetime, timezone, timedelta
@@ -451,6 +451,22 @@ class OwnerApiKey(Base):
 
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+class PlanSubscription(Base):
+    __tablename__ = "plan_subscriptions"
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("clients.id"), index=True)
+    tier: Mapped[str] = mapped_column(String(20))  # starter, growth, professional, enterprise
+    period: Mapped[str] = mapped_column(String(20))  # monthly, quarterly, yearly
+    price_usd: Mapped[float] = mapped_column(Float)
+    start_date: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    end_date: Mapped[datetime] = mapped_column(DateTime)
+    auto_renew: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    # relationship to Client
+    client: Mapped["Client"] = relationship("Client", backref="plan_subscriptions")
 
 
 # NOTE: Broadcast models are intentionally NOT imported here at module scope.

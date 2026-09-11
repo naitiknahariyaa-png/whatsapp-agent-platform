@@ -184,12 +184,89 @@ def main(argv=None) -> int:
                    help="human = ~55-65s jittered gap per send (default); "
                         "bot = spec anti_ban 2-7s jitter, max 20/min via limiter")
 
+    # -- Multi-Account Manager ------------------------------------------------
+    s = sub.add_parser("accounts-setup",
+                       help="Create many business accounts + owners from one profiles JSON (parallel AI per account)")
+    s.add_argument("path", help="path to profiles.json (see samples/profiles.sample.json)")
+
+    s = sub.add_parser("accounts-list", help="List all business accounts (tenants)")
+
+    s = sub.add_parser("accounts-run",
+                       help="Run ALL accounts in parallel - each AI writes+sends only its own business outreach")
+    s.add_argument("--live", action="store_true",
+                   help="real sends via Meta Cloud API / bridge (default: simulate in-terminal)")
+    s.add_argument("--limit", type=int, default=0,
+                   help="first N contacts per account (0 = all)")
+    s.add_argument("--ids", default="",
+                   help="comma-separated client_ids to run (default: all active)")
+    s.add_argument("--fast", action="store_true",
+                   help="minimal pacing (simulate/testing only)")
+
     args = p.parse_args(argv)
 
     if args.command == "start-server":
         ok, msg = cc.cmd_start_server(args.port)
         print(msg)
         return 0 if ok else 1
+
+    if args.command == "accounts-setup":
+        import asyncio
+        import sys as _sys
+        if hasattr(_sys.stdout, "reconfigure"):
+            _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        _sys.path.insert(0, "agent-engine")
+        from multi_accounts import setup_accounts
+        res = asyncio.run(setup_accounts(args.path))
+        print(f"Created {len(res['created'])} accounts:")
+        for c in res["created"]:
+            print(f"  #{c['client_id']} {c['business_name']} "
+                  f"({c['vertical']}) {c['whatsapp_number']}")
+        if res["skipped"]:
+            print(f"Skipped {len(res['skipped'])} (duplicate numbers):")
+            for c in res["skipped"]:
+                print(f"  #{c['client_id']} {c['business_name']} - {c['reason']}")
+        return 0 if res["created"] else 1
+
+    if args.command == "accounts-list":
+        import asyncio
+        _sys_path_backup = sys.path
+        sys.path.insert(0, "agent-engine")
+        from multi_accounts import list_accounts
+        rows = asyncio.run(list_accounts())
+        sys.path = _sys_path_backup
+        print(f"{len(rows)} accounts:")
+        for a in rows:
+            state = "on " if a["is_active"] else "OFF"
+            print(f"  #{a['client_id']} [{state}] {a['business_name']} "
+                  f"({a['vertical']}, {a['plan']}) {a['whatsapp_number']} "
+                  f"- {a['contacts']} contacts")
+        return 0
+
+    if args.command == "accounts-run":
+        import asyncio
+        import sys as _sys
+        if hasattr(_sys.stdout, "reconfigure"):
+            _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        _sys.path.insert(0, "agent-engine")
+        from multi_accounts import run_all
+        ids = [int(x) for x in args.ids.split(",") if x.strip()] if args.ids else None
+        mode = "live" if args.live else "simulate"
+        print(f"Running accounts in PARALLEL ({mode})...")
+
+        async def on_status(cid, biz, i, tot, phone, kind, text):
+            print(f"[{biz}] [{i}/{tot}] {phone} -> {kind}")
+            print(f"    {text}")
+
+        res = asyncio.run(run_all(mode=mode, client_ids=ids, limit=args.limit,
+                                  fast=args.fast, on_status=on_status))
+        print("PER-ACCOUNT RESULTS:")
+        for r in res.get("results", []):
+            print(f"  #{r['client_id']} {r['business_name']}: "
+                  f"{r['sent']} sent, {r['failed']} failed, {r['total']} contacts")
+        if res.get("error"):
+            print("ERROR:", res["error"])
+        print("RESULT:", {k: v for k, v in res.items() if k != "results"})
+        return 0 if res.get("ok") else 1
 
     if args.command == "report-broadcast":
         import asyncio

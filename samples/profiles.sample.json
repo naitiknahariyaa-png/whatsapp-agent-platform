@@ -1,0 +1,39 @@
+[
+  {
+    "business_name": "Dr Asha Clinic",
+    "vertical": "doctor",
+    "whatsapp_number": "+919000000001",
+    "brand_voice": "formal",
+    "services": ["Skin consultation", "Laser therapy"],
+    "business_hours": "Mon-Sat 10:00-19:00",
+    "contacts": [
+      {"name": "Ramesh", "phone": "+919888777111"},
+      {"name": "Suresh", "phone": "+919888777112"},
+      {"name": "Priya", "phone": "+919888777113"}
+    ]
+  },
+  {
+    "business_name": "Glow and Go Salon",
+    "vertical": "salon",
+    "whatsapp_number": "+919000000002",
+    "brand_voice": "playful",
+    "services": ["Haircut and styling", "Bridal package"],
+    "business_hours": "Mon-Sun 09:00-20:00",
+    "contacts": [
+      {"name": "Anita", "phone": "+919888777222"},
+      {"name": "Neha", "phone": "+919888777223"}
+    ]
+  },
+  {
+    "business_name": "Spice Junction",
+    "vertical": "restaurant",
+    "whatsapp_number": "+919000000003",
+    "brand_voice": "casual",
+    "services": ["North Indian thali", "Tandoori specials"],
+    "business_hours": "Mon-Sun 11:00-23:00",
+    "contacts": [
+      {"name": "Vikram", "phone": "+919888777333"},
+      {"name": "Karan", "phone": "+919888777334"}
+    ]
+  }
+]
