@@ -202,12 +202,107 @@ def main(argv=None) -> int:
     s.add_argument("--fast", action="store_true",
                    help="minimal pacing (simulate/testing only)")
 
+    # -- AI model ----------------------------------------------------------------
+    s = sub.add_parser("model",
+                       help="Show or change the AI model/provider used by every agent")
+    s.add_argument("--set", help="set LLM_MODEL (e.g. llama-3.3-70b-versatile)")
+    s.add_argument("--provider", choices=["groq", "ollama", "openai"],
+                   help="also set LLM_PROVIDER")
+    s.add_argument("--list", action="store_true",
+                   help="list providers and popular models")
+
+    # -- Functional registry (every new functional lands here) --------------------
+    s = sub.add_parser("functional",
+                       help="Run ANY registered platform function from the terminal")
+    s.add_argument("name", nargs="?", default="",
+                   help="registered functional name (no name = list all)")
+    s.add_argument("--args", dest="args_json", default="",
+                   help="JSON kwargs for the functional")
+    s.add_argument("--args-file", dest="args_file", default="",
+                   help="path to a JSON file with kwargs (avoids shell quoting)")
+
     args = p.parse_args(argv)
 
     if args.command == "start-server":
         ok, msg = cc.cmd_start_server(args.port)
         print(msg)
         return 0 if ok else 1
+
+    if args.command == "model":
+        import sys as _sys
+        import os as _os
+        if hasattr(_sys.stdout, "reconfigure"):
+            _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        _sys.path.insert(0, "agent-engine")
+        envp = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                             "agent-engine", ".env")
+        if args.set:
+            kv = [("LLM_MODEL", args.set)]
+            if args.provider:
+                kv.append(("LLM_PROVIDER", args.provider))
+                if args.provider == "openai":
+                    kv.append(("OPENAI_MODEL", args.set))
+            lines = []
+            if _os.path.exists(envp):
+                with open(envp, "r", encoding="utf-8") as f:
+                    lines = f.read().splitlines()
+            for key, val in kv:
+                hit = False
+                for i, line in enumerate(lines):
+                    if line.strip().startswith(key + "="):
+                        lines[i] = key + "=" + val
+                        hit = True
+                        break
+                if not hit:
+                    lines.append(key + "=" + val)
+            with open(envp, "w", encoding="utf-8") as f:
+                f.write(chr(10).join(lines) + chr(10))
+            print("Saved to " + envp)
+            for key, val in kv:
+                print("  " + key + "=" + val)
+            return 0
+        from config import settings
+        print("provider:     " + settings.llm_provider)
+        print("model:        " + settings.llm_model)
+        print("openai_model:" + settings.openai_model)
+        print("ollama_url:   " + settings.ollama_base_url)
+        print("per-task overrides (env):")
+        for t in ("CONVERSATION", "PLANNING", "GENERATION",
+                  "REASONING", "VERIFICATION"):
+            print("  " + t + "_MODEL = " + _os.getenv(t + "_MODEL", "(LLM_MODEL)"))
+        if args.list:
+            print("providers: groq | ollama | openai | mock")
+            print("popular groq models:")
+            for m in ("llama-3.3-70b-versatile", "llama-3.1-8b-instant",
+                      "qwen/qwen3.8-27b", "gemma2-9b-it",
+                      "deepseek-r1-distill-llama-70b"):
+                print("  " + m)
+        return 0
+
+    if args.command == "functional":
+        import sys as _sys
+        if hasattr(_sys.stdout, "reconfigure"):
+            _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        _sys.path.insert(0, "agent-engine")
+        from cli_registry import list_functional, run_functional
+        if not args.name:
+            print("Registered functionals (run: python cli.py functional <name> "
+                  "--args JSON)")
+            for r in list_functional():
+                print("  " + r["name"] + "  -  " + r["help"])
+                if r["params"]:
+                    print("      params: " + json.dumps(r["params"]))
+            return 0
+        if args.args_json:
+            kwargs = json.loads(args.args_json)
+        elif args.args_file:
+            with open(args.args_file, "r", encoding="utf-8") as f:
+                kwargs = json.load(f)
+        else:
+            kwargs = {}
+        data = run_functional(args.name, kwargs)
+        print(json.dumps(data, indent=2, default=str))
+        return 0
 
     if args.command == "accounts-setup":
         import asyncio

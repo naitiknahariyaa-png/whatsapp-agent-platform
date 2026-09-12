@@ -112,6 +112,9 @@ async def list_accounts() -> List[Dict[str, Any]]:
                 for c in rows]
 
 
+SENDER_NAME = os.getenv("WAP_SENDER_NAME", "NAITIK NAHARIYA")
+
+
 def build_account_message(profile: Dict[str, Any], contact: Dict[str, Any]) -> str:
     """Per-account AI copy - ONLY this business's own services, <=160 chars.
 
@@ -130,13 +133,19 @@ def build_account_message(profile: Dict[str, Any], contact: Dict[str, Any]) -> s
     hours_txt = f" Open {hours}." if hours and len(hours) < 40 else ""
     hook = _VERTICAL_HOOK.get((profile.get("vertical") or "general").lower(),
                               "get started today")
+    sender = (profile.get("sender_name") or SENDER_NAME or "").strip()
+    sig = f" - {sender}" if sender and sender.upper() != biz.upper() else ""
     variants = [
-        f"Hi {name}! {biz}: {svc}{extra}. {hook.capitalize()} this week.",
-        f"Hi {name}, {biz} here - {svc}{extra}, done right. "
-        f"{hook.capitalize()}!",
-        f"Hello {name}, need {svc.lower()}? {biz} has you covered.{hours_txt}",
-        f"Hi {name}! {biz}: expert {svc.lower()}{extra}. "
-        f"Reply YES to {hook}.",
+        f"Hello {name}, I am {sender} from {biz}. We offer {svc}{extra}. "
+        f"May I share how this helps your business grow?",
+        f"Hi {name}, {biz} - {sender} here. We help businesses with "
+        f"{svc.lower()}{extra}. Would a quick overview be helpful?",
+        f"Dear {name}, {biz}: {svc}{extra}. I am {sender}, happy to walk "
+        f"you through it. May I send a short summary?",
+        f"Good day {name}, {sender} from {biz} reaching out professionally. "
+        f"We provide {svc}{extra}. Interested in learning more?",
+        f"Hello {name}, {biz} here{sig}. {hook.capitalize()} with our "
+        f"{svc.lower()}. Shall I send details?",
     ]
     for v in variants:
         if len(v) <= 160:
